@@ -629,11 +629,11 @@ hypre_spgemm_symbolic_rownnz( int  m,
    /* CUDA kernel configurations: bDim.z is the number of groups in block */
    dim3 bDim(BDIMX, BDIMY, num_groups_per_block);
 	assert(bDim.x * bDim.y == GROUP_SIZE);
-   // grid dimension (number of blocks)
+
+
+	// The grid dim is hardcoded for how Hypre runs it. I need to dynamically determine it from SpgemmBlockNumDim.
 	const int num_blocks = 220; // std::min( hypre_SpgemmBlockNumDim()[0][BIN],(int) ((m + bDim.z - 1) / bDim.z) );
    dim3 gDim( num_blocks );
-   // number of active groups
-   //int num_act_groups = std::min((int) (bDim.z * gDim.x), m);
 
    const char HASH_TYPE = HYPRE_SPGEMM_HASH_TYPE;
    if (HASH_TYPE != 'L' && HASH_TYPE != 'Q' && HASH_TYPE != 'D')

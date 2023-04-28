@@ -4,7 +4,7 @@ reproducer for symbolic matrix matrix multiply differences between ROCm 5.4.0 an
 tar zxvf input_files.gz
 	
 module load rocm/5.4.3
-hipcc -O1 -g -Wall -I/opt/rocm-5.4.3/include/hip/  hypre_repro.cpp
+hipcc -O2 -g -Wall -I/opt/rocm-5.4.3/include/hip/  hypre_repro.cpp
 srun -n 1 ./a.out
 
 mullowne@crusher145:~/SM/hypre_spgemm_symb_repro> srun -n 1 ./a.out
@@ -17,7 +17,7 @@ mullowne@crusher145:~/SM/hypre_spgemm_symb_repro> srun -n 1 ./a.out
 	[hypre_repro.cpp, 1249]: num of failed rows 1 (0.00)
 
 module load rocm/5.4.0
-hipcc -O1 -g -Wall -I/opt/rocm-5.4.0/include/hip/  hypre_repro.cpp
+hipcc -O2 -g -Wall -I/opt/rocm-5.4.0/include/hip/  hypre_repro.cpp
 srun -n 1 ./a.out
 
 mullowne@crusher145:~/SM/hypre_spgemm_symb_repro> srun -n 1 ./a.out
