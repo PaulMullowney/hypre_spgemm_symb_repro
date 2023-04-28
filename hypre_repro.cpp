@@ -204,13 +204,6 @@ void warp_sync()
    __syncwarp();
 }
 
-template <typename T>
-static __device__ __forceinline__
-T read_only_load( const T *ptr )
-{
-   return *ptr;
-}
-
 
 template <typename T>
 static __device__ __forceinline__
@@ -341,7 +334,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
 
       if (lane < 2)
       {
-         v1 = read_only_load(ptr + lane);
+         v1 = ptr[lane];
       }
       v2 = __shfl(v1, 1, HYPRE_WARP_SIZE);
       v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
@@ -353,7 +346,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
 
       if (valid_ptr && lane < 2)
       {
-         v1 = read_only_load(ptr + lane);
+         v1 = ptr[lane];
       }
       v2 = __shfl(v1, 1, GROUP_SIZE);
       v1 = __shfl(v1, 0, GROUP_SIZE);
@@ -375,7 +368,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
 
       if (!lane)
       {
-         v1 = read_only_load(ptr);
+         v1 = *ptr;
       }
 		v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
    }
@@ -386,7 +379,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
 
       if (valid_ptr && !lane)
       {
-         v1 = read_only_load(ptr);
+         v1 = *ptr;
       }
       v1 = __shfl(v1, 0, GROUP_SIZE);
    }
@@ -623,7 +616,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
 
       if (threadIdx_x == 0 && i < iend_a)
       {
-         rowB = read_only_load(ja + i);
+         rowB = ja[i];
       }
 
 #if 0
@@ -640,7 +633,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
       int tmp = 0;
       if (rowB != -1 && threadIdx_x < 2)
       {
-         tmp = read_only_load(ib + rowB + threadIdx_x);
+         tmp = ib[rowB + threadIdx_x];
       }
 		const int rowB_start = __shfl(tmp, 0, blockDim_x);
 		const int rowB_end   = __shfl(tmp, 1, blockDim_x);
@@ -657,7 +650,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
             }
             else
             {
-               const int k_idx = read_only_load(jb + k);
+               const int k_idx = jb[k];
                /* first try to insert into shared memory hash table */
                int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, HASHTYPE, UNROLL_FACTOR>
                                (s_HashKeys, k_idx, num_new_insert);
