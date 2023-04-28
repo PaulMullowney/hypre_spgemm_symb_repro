@@ -8,7 +8,6 @@
 #define HYPRE_SPGEMM_MAX_NBIN 10
 
 static const char HYPRE_SPGEMM_HASH_TYPE = 'D';
-/* bin settings                             0   1   2    3    4    5     6     7     8     9     10 */
 constexpr int SYMBL_HASH_SIZE[11] = { 0, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
 constexpr int T_GROUP_SIZE[11]    = { 0,  2,  4,   8,  16,  32,   64,  128,  256,  512,  1024 };
 
@@ -168,21 +167,6 @@ static __device__ __forceinline__
 int warp_any_sync(unsigned mask, int predicate)
 {
    return __any_sync(mask, predicate);
-}
-
-template <typename T>
-static __device__ __forceinline__
-T __shfl_sync(unsigned mask, T val, int src_line, int width = HYPRE_WARP_SIZE)
-{
-   return __shfl(val, src_line, width);
-}
-
-template <typename T>
-static __device__ __forceinline__
-T warp_shuffle_sync(unsigned mask, T val, int src_line,
-                    int width = HYPRE_WARP_SIZE)
-{
-   return __shfl_sync(mask, val, src_line, width);
 }
 
 
@@ -359,8 +343,8 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
       {
          v1 = read_only_load(ptr + lane);
       }
-      v2 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 1);
-      v1 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 0);
+      v2 = __shfl(v1, 1, HYPRE_WARP_SIZE);
+      v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
    }
    else
    {
@@ -371,8 +355,8 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
       {
          v1 = read_only_load(ptr + lane);
       }
-      v2 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 1, GROUP_SIZE);
-      v1 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 0, GROUP_SIZE);
+      v2 = __shfl(v1, 1, GROUP_SIZE);
+      v1 = __shfl(v1, 0, GROUP_SIZE);
    }
 }
 
@@ -393,7 +377,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
       {
          v1 = read_only_load(ptr);
       }
-      v1 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 0);
+		v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
    }
    else
    {
@@ -404,7 +388,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
       {
          v1 = read_only_load(ptr);
       }
-      v1 = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, v1, 0, GROUP_SIZE);
+      v1 = __shfl(v1, 0, GROUP_SIZE);
    }
 }
 
@@ -455,48 +439,6 @@ T group_reduce_sum(T in, volatile T *s_WarpData)
    block_sync();
 
    return out;
-}
-
-/* GROUP_SIZE must <= HYPRE_WARP_SIZE */
-template <typename T, int GROUP_SIZE>
-static __device__ __forceinline__
-T group_prefix_sum(int lane_id, T in, T &all_sum)
-{
-#pragma unroll
-   for (int d = 2; d <= GROUP_SIZE; d <<= 1)
-   {
-      T t = warp_shuffle_up_sync(HYPRE_WARP_FULL_MASK, in, d >> 1, GROUP_SIZE);
-      if ( (lane_id & (d - 1)) == (d - 1) )
-      {
-         in += t;
-      }
-   }
-
-   all_sum = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, in, GROUP_SIZE - 1, GROUP_SIZE);
-
-   if (lane_id == GROUP_SIZE - 1)
-   {
-      in = 0;
-   }
-
-#pragma unroll
-   for (int d = GROUP_SIZE >> 1; d > 0; d >>= 1)
-   {
-      T t = warp_shuffle_xor_sync(HYPRE_WARP_FULL_MASK, in, d, GROUP_SIZE);
-
-      if ( (lane_id & (d - 1)) == (d - 1))
-      {
-         if ( (lane_id & ((d << 1) - 1)) == ((d << 1) - 1) )
-         {
-            in += t;
-         }
-         else
-         {
-            in = t;
-         }
-      }
-   }
-   return in;
 }
 
 template <int GROUP_SIZE>
@@ -692,15 +634,16 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
 #endif
 
       /* threads in the same ygroup work on one row together */
-      rowB = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, rowB, 0, blockDim_x);
+		rowB = __shfl(rowB, 0, blockDim_x);
+
       /* open this row of B, collectively */
       int tmp = 0;
       if (rowB != -1 && threadIdx_x < 2)
       {
          tmp = read_only_load(ib + rowB + threadIdx_x);
       }
-      const int rowB_start = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, tmp, 0, blockDim_x);
-      const int rowB_end   = warp_shuffle_sync(HYPRE_WARP_FULL_MASK, tmp, 1, blockDim_x);
+		const int rowB_start = __shfl(tmp, 0, blockDim_x);
+		const int rowB_end   = __shfl(tmp, 1, blockDim_x);
 
       for (int k = rowB_start + threadIdx_x;
            warp_any_sync(HYPRE_WARP_FULL_MASK, k < rowB_end);
@@ -974,12 +917,6 @@ hypre_spgemm_symbolic_rownnz( int  m,
    int *d_ghash_j = NULL;
    int  ghash_size = 0;
 
-   // if (need_ghash)
-   // {
-   //    hypre_SpGemmCreateGlobalHashTable(m, row_ind, num_act_groups, d_rc, SHMEM_HASH_SIZE,
-   //                                      &d_ghash_i, &d_ghash_j, NULL, &ghash_size);
-   // }
-
    printf("%s[%d], BIN[%d]: m %d k %d n %d, HASH %c, SHMEM_HASH_SIZE %d, GROUP_SIZE %d, "
 			 "can_fail %d, need_ghash %d, ghash %p size %d\n",
 			 __FILE__, __LINE__, BIN, m, k, n,
@@ -995,45 +932,20 @@ hypre_spgemm_symbolic_rownnz( int  m,
     * ---------------------------------------------------------------------------*/
    assert(HAS_RIND == (row_ind != NULL) );
 
-   /* <NUM_GROUPS_PER_BLOCK, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, CAN_FAIL, HASHTYPE, HAS_GHASH> */
-
    if (can_fail)
    {
-      // if (ghash_size)
-      // {
-      //    HYPRE_GPU_LAUNCH2(
-      //       (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, true, HASH_TYPE, true>),
-      //       gDim, bDim, shmem_bytes,
-      //       m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
-      // }
-      // else
-      // {
          HYPRE_GPU_LAUNCH2(
             (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, true, HASH_TYPE, false>),
             gDim, bDim, shmem_bytes,
             m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
-			// }
    }
    else
    {
-      // if (ghash_size)
-      // {
-      //    HYPRE_GPU_LAUNCH2(
-      //       (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, false, HASH_TYPE, true>),
-      //       gDim, bDim, shmem_bytes,
-      //       m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
-      // }
-      // else
-      // {
          HYPRE_GPU_LAUNCH2(
             (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, false, HASH_TYPE, false>),
             gDim, bDim, shmem_bytes,
             m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
-			//}
    }
-
-   //hipFree(d_ghash_i);
-	//hipFree(d_ghash_j);
 
    return 0;
 }
