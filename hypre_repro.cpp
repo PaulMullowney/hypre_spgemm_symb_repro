@@ -273,8 +273,7 @@ hypre_spgemm_hash_insert_symbl(
       }
       else
       {
-         j = HashFunc<HASHTYPE>(SHMEM_HASH_SIZE, key, i, j);
-         //j = HashFunc<SHMEM_HASH_SIZE, HASHTYPE>(key, i, j);
+         j = HashFunc<SHMEM_HASH_SIZE, HASHTYPE>(key, i, j);
       }
 
       /* try to insert key+1 into slot j */
@@ -582,28 +581,6 @@ hypre_spgemm_symbolic( const int               M,
          }
       }
    }
-}
-
-template <int SHMEM_HASH_SIZE, int GROUP_SIZE>
-int hypre_spgemm_symbolic_max_num_blocks( int  multiProcessorCount,
-                                                int *num_blocks_ptr,
-                                                int *block_size_ptr )
-{
-   const char HASH_TYPE = HYPRE_SPGEMM_HASH_TYPE;
-   const int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
-   const int block_size = num_groups_per_block * GROUP_SIZE;
-   int numBlocksPerSm = 0;
-   int dynamic_shmem_size = 0;
-
-   hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &numBlocksPerSm,
-      hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, true, false, HASH_TYPE, true>,
-      block_size, dynamic_shmem_size);
-
-   *num_blocks_ptr = multiProcessorCount * numBlocksPerSm;
-   *block_size_ptr = block_size;
-
-   return 0;
 }
 
 template <int BIN, int SHMEM_HASH_SIZE, int GROUP_SIZE, bool HAS_RIND>
