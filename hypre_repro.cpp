@@ -157,54 +157,6 @@ int hypre_gpu_get_grid_warp_id()
           hypre_gpu_get_warp_id<bdim>();
 }
 
-static __device__ __forceinline__
-int __any_sync(unsigned mask, int predicate)
-{
-   return __any(predicate);
-}
-
-static __device__ __forceinline__
-int warp_any_sync(unsigned mask, int predicate)
-{
-   return __any_sync(mask, predicate);
-}
-
-
-template <typename T>
-static __device__ __forceinline__
-T __shfl_down_sync(unsigned mask, T val, unsigned delta, int width = HYPRE_WARP_SIZE)
-{
-   return __shfl_down(val, delta, width);
-}
-
-template <typename T>
-static __device__ __forceinline__
-T warp_shuffle_down_sync(unsigned mask, T val, int delta,
-                         int width = HYPRE_WARP_SIZE)
-{
-   return __shfl_down_sync(mask, val, delta, width);
-}
-
-/* sync the thread block */
-static __device__ __forceinline__
-void block_sync()
-{
-   __syncthreads();
-}
-
-static __device__ __forceinline__
-void __syncwarp()
-{
-}
-
-/* sync the warp */
-static __device__ __forceinline__
-void warp_sync()
-{
-   __syncwarp();
-}
-
-
 template <typename T>
 static __device__ __forceinline__
 T warp_reduce_sum(T in)
@@ -212,51 +164,11 @@ T warp_reduce_sum(T in)
 #pragma unroll
    for (int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
    {
-      in += __shfl_down_sync(HYPRE_WARP_FULL_MASK, in, d);
+		in += __shfl_down(in, d, HYPRE_WARP_SIZE);
    }
    return in;
 }
 
-dim3
-hypre_GetDefaultDeviceBlockDimension()
-{
-   dim3 bDim(HYPRE_1D_BLOCK_SIZE, 1, 1);
-   return bDim;
-}
-
-/*--------------------------------------------------------------------
- * hypre_GetDefaultDeviceGridDimension
- *--------------------------------------------------------------------*/
-
-dim3
-hypre_GetDefaultDeviceGridDimension( int   n,
-                                     const char *granularity,
-                                     dim3        bDim )
-{
-   int num_blocks = 0;
-   int num_threads_per_block = bDim.x * bDim.y * bDim.z;
-
-   if (granularity[0] == 't')
-   {
-      num_blocks = (n + num_threads_per_block - 1) / num_threads_per_block;
-   }
-   else if (granularity[0] == 'w')
-   {
-      int num_warps_per_block = num_threads_per_block >> HYPRE_WARP_BITSHIFT;
-
-      assert(num_warps_per_block * HYPRE_WARP_SIZE == num_threads_per_block);
-
-      num_blocks = (n + num_warps_per_block - 1) / num_warps_per_block;
-   }
-   else
-   {
-      printf("Error %s %d: Unknown granularity !\n", __FILE__, __LINE__);
-      assert(0);
-   }
-
-   dim3 gDim = dim3(num_blocks);
-   return gDim;
-}
 
 #if defined(HYPRE_DEBUG)
 #define GPU_LAUNCH_SYNC { hypre_SyncComputeStream(hypre_handle()); hypre_GetDeviceLastError(); }
@@ -396,7 +308,7 @@ T group_reduce_sum(T in)
 #pragma unroll
    for (int d = GROUP_SIZE / 2; d > 0; d >>= 1)
    {
-      in += warp_shuffle_down_sync(HYPRE_WARP_FULL_MASK, in, d);
+		in += __shfl_down(in, d, HYPRE_WARP_SIZE);
    }
 
    return in;
@@ -421,7 +333,7 @@ T group_reduce_sum(T in, volatile T *s_WarpData)
       s_WarpData[warp_id] = out;
    }
 
-   block_sync();
+   __syncthreads();
 
    if (get_warp_in_group_id<GROUP_SIZE>() == 0)
    {
@@ -429,7 +341,7 @@ T group_reduce_sum(T in, volatile T *s_WarpData)
       out = warp_reduce_sum(a);
    }
 
-   block_sync();
+   __syncthreads();
 
    return out;
 }
@@ -438,14 +350,8 @@ template <int GROUP_SIZE>
 static __device__ __forceinline__
 void group_sync()
 {
-   if (GROUP_SIZE <= HYPRE_WARP_SIZE)
-   {
-      warp_sync();
-   }
-   else
-   {
-      block_sync();
-   }
+   if (GROUP_SIZE > HYPRE_WARP_SIZE)
+      __syncthreads();
 }
 
 /* Hash functions */
@@ -609,8 +515,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
    int num_new_insert = 0;
 
    /* load column idx and values of row i of A */
-   for (int i = istart_a + threadIdx_y; warp_any_sync(HYPRE_WARP_FULL_MASK, i < iend_a);
-        i += blockDim_y)
+   for (int i = istart_a + threadIdx_y; __any(i < iend_a); i += blockDim_y)
    {
       int rowB = -1;
 
@@ -638,9 +543,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
 		const int rowB_start = __shfl(tmp, 0, blockDim_x);
 		const int rowB_end   = __shfl(tmp, 1, blockDim_x);
 
-      for (int k = rowB_start + threadIdx_x;
-           warp_any_sync(HYPRE_WARP_FULL_MASK, k < rowB_end);
-           k += blockDim_x)
+      for (int k = rowB_start + threadIdx_x; __any(k < rowB_end); k += blockDim_x)
       {
          if (k < rowB_end)
          {
@@ -713,8 +616,7 @@ hypre_spgemm_symbolic( const int               M,
    /* WM: note - in cuda/hip, exited threads are not required to reach collective calls like
     *            syncthreads(), but this is not true for sycl (all threads must call the collective).
     *            Thus, all threads in the block must enter the loop (which is not ensured for cuda). */
-   for (int i = grid_group_id; warp_any_sync(HYPRE_WARP_FULL_MASK, i < M);
-        i += grid_num_groups)
+   for (int i = grid_group_id; __any(i<M); i += grid_num_groups)
    {
       valid_ptr = GROUP_SIZE >= HYPRE_WARP_SIZE || i < M;
 
@@ -825,8 +727,8 @@ hypre_spgemm_symbolic( const int               M,
          }
          else
          {
-         group_sync<GROUP_SIZE>();
-            failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>((int) failed,
+				group_sync<GROUP_SIZE>();
+				failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>((int) failed,
 																												s_HashKeys);
          }
       }
