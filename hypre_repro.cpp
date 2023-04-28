@@ -1,62 +1,7 @@
-/* HashKeys: assumed to be initialized as all -1's
- * Key:      assumed to be nonnegative
- * increase by 1 if is a new entry
- */
 #include "hip_runtime.h"
 #include <cassert>
 
-/*
-#include <thrust/execution_policy.h>
-#include <thrust/system/hip/execution_policy.h>
-#include <thrust/count.h>
-#include <thrust/device_ptr.h>
-#include <thrust/unique.h>
-#include <thrust/sort.h>
-#include <thrust/binary_search.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/transform.h>
-#include <thrust/functional.h>
-#include <thrust/gather.h>
-#include <thrust/scan.h>
-#include <thrust/fill.h>
-#include <thrust/adjacent_difference.h>
-#include <thrust/inner_product.h>
-#include <thrust/logical.h>
-#include <thrust/replace.h>
-#include <thrust/sequence.h>
-#include <thrust/for_each.h>
-#include <thrust/remove.h>
-*/
-
 using hypre_DeviceItem = void*;
-
-typedef int HYPRE_Int;
-typedef int hypre_int;
-typedef double HYPRE_Complex;
-
-dim3
-hypre_dim3(HYPRE_Int x)
-{
-   dim3 d(x);
-   return d;
-}
-
-dim3
-hypre_dim3(HYPRE_Int x, HYPRE_Int y)
-{
-   dim3 d(x, y);
-   return d;
-}
-
-dim3
-hypre_dim3(HYPRE_Int x, HYPRE_Int y, HYPRE_Int z)
-{
-   dim3 d(x, y, z);
-   return d;
-}
-
 
 #define HYPRE_WARP_SIZE       64
 #define HYPRE_WARP_BITSHIFT   6
@@ -70,18 +15,18 @@ hypre_dim3(HYPRE_Int x, HYPRE_Int y, HYPRE_Int z)
 #define COHEN_USE_SHMEM 0
 static const char HYPRE_SPGEMM_HASH_TYPE = 'D';
 /* bin settings                             0   1   2    3    4    5     6     7     8     9     10 */
-constexpr HYPRE_Int SYMBL_HASH_SIZE[11] = { 0, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
-constexpr HYPRE_Int T_GROUP_SIZE[11]    = { 0,  2,  4,   8,  16,  32,   64,  128,  256,  512,  1024 };
+constexpr int SYMBL_HASH_SIZE[11] = { 0, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+constexpr int T_GROUP_SIZE[11]    = { 0,  2,  4,   8,  16,  32,   64,  128,  256,  512,  1024 };
 #define HYPRE_SPGEMM_DEFAULT_BIN 6
 /* unroll factor in the kernels */
 #define HYPRE_SPGEMM_NUMER_UNROLL 256
 #define HYPRE_SPGEMM_SYMBL_UNROLL 512
 
-HYPRE_Int                         spgemm_block_num_dim[4][HYPRE_SPGEMM_MAX_NBIN + 1];
+int                         spgemm_block_num_dim[4][HYPRE_SPGEMM_MAX_NBIN + 1];
 #define hypre_SpgemmBlockNumDim() spgemm_block_num_dim
 
-template <HYPRE_Int GROUP_SIZE>
-static constexpr HYPRE_Int
+template <int GROUP_SIZE>
+static constexpr int
 hypre_spgemm_get_num_groups_per_block()
 {
    return std::max(512 / GROUP_SIZE, 1);
@@ -89,9 +34,9 @@ hypre_spgemm_get_num_groups_per_block()
 
 
 /* return the number of threads in block */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_num_threads(hypre_DeviceItem &item)
+int hypre_gpu_get_num_threads(hypre_DeviceItem &item)
 {
    switch (dim)
    {
@@ -107,9 +52,9 @@ hypre_int hypre_gpu_get_num_threads(hypre_DeviceItem &item)
 }
 
 /* return the flattened thread id in block */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_thread_id(hypre_DeviceItem &item)
+int hypre_gpu_get_thread_id(hypre_DeviceItem &item)
 {
    switch (dim)
    {
@@ -126,33 +71,33 @@ hypre_int hypre_gpu_get_thread_id(hypre_DeviceItem &item)
 }
 
 /* return the number of warps in block */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_num_warps(hypre_DeviceItem &item)
+int hypre_gpu_get_num_warps(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_num_threads<dim>(item) >> HYPRE_WARP_BITSHIFT;
 }
 
 /* return the warp id in block */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_warp_id(hypre_DeviceItem &item)
+int hypre_gpu_get_warp_id(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_thread_id<dim>(item) >> HYPRE_WARP_BITSHIFT;
 }
 
 /* return the thread lane id in warp */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_lane_id(hypre_DeviceItem &item)
+int hypre_gpu_get_lane_id(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_thread_id<dim>(item) & (HYPRE_WARP_SIZE - 1);
 }
 
 /* return the num of blocks in grid */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_num_blocks()
+int hypre_gpu_get_num_blocks()
 {
    switch (dim)
    {
@@ -168,9 +113,9 @@ hypre_int hypre_gpu_get_num_blocks()
 }
 
 /* return the flattened block id in grid */
-template <hypre_int dim>
+template <int dim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_block_id(hypre_DeviceItem &item)
+int hypre_gpu_get_block_id(hypre_DeviceItem &item)
 {
    switch (dim)
    {
@@ -187,62 +132,62 @@ hypre_int hypre_gpu_get_block_id(hypre_DeviceItem &item)
 }
 
 /* return the number of threads in grid */
-template <hypre_int bdim, hypre_int gdim>
+template <int bdim, int gdim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_grid_num_threads(hypre_DeviceItem &item)
+int hypre_gpu_get_grid_num_threads(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_num_blocks<gdim>() * hypre_gpu_get_num_threads<bdim>(item);
 }
 
 /* return the flattened thread id in grid */
-template <hypre_int bdim, hypre_int gdim>
+template <int bdim, int gdim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_grid_thread_id(hypre_DeviceItem &item)
+int hypre_gpu_get_grid_thread_id(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_block_id<gdim>(item) * hypre_gpu_get_num_threads<bdim>(item) +
           hypre_gpu_get_thread_id<bdim>(item);
 }
 
 /* return the number of warps in grid */
-template <hypre_int bdim, hypre_int gdim>
+template <int bdim, int gdim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_grid_num_warps(hypre_DeviceItem &item)
+int hypre_gpu_get_grid_num_warps(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_num_blocks<gdim>() * hypre_gpu_get_num_warps<bdim>(item);
 }
 
 /* return the flattened warp id in grid */
-template <hypre_int bdim, hypre_int gdim>
+template <int bdim, int gdim>
 static __device__ __forceinline__
-hypre_int hypre_gpu_get_grid_warp_id(hypre_DeviceItem &item)
+int hypre_gpu_get_grid_warp_id(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_block_id<gdim>(item) * hypre_gpu_get_num_warps<bdim>(item) +
           hypre_gpu_get_warp_id<bdim>(item);
 }
 
 static __device__ __forceinline__
-hypre_int __any_sync(unsigned mask, hypre_int predicate)
+int __any_sync(unsigned mask, int predicate)
 {
    return __any(predicate);
 }
 
 static __device__ __forceinline__
-hypre_int warp_any_sync(hypre_DeviceItem &item, unsigned mask, hypre_int predicate)
+int warp_any_sync(hypre_DeviceItem &item, unsigned mask, int predicate)
 {
    return __any_sync(mask, predicate);
 }
 
 template <typename T>
 static __device__ __forceinline__
-T __shfl_sync(unsigned mask, T val, hypre_int src_line, hypre_int width = HYPRE_WARP_SIZE)
+T __shfl_sync(unsigned mask, T val, int src_line, int width = HYPRE_WARP_SIZE)
 {
    return __shfl(val, src_line, width);
 }
 
 template <typename T>
 static __device__ __forceinline__
-T warp_shuffle_sync(hypre_DeviceItem &item, unsigned mask, T val, hypre_int src_line,
-                    hypre_int width = HYPRE_WARP_SIZE)
+T warp_shuffle_sync(hypre_DeviceItem &item, unsigned mask, T val, int src_line,
+                    int width = HYPRE_WARP_SIZE)
 {
    return __shfl_sync(mask, val, src_line, width);
 }
@@ -250,15 +195,15 @@ T warp_shuffle_sync(hypre_DeviceItem &item, unsigned mask, T val, hypre_int src_
 
 template <typename T>
 static __device__ __forceinline__
-T __shfl_down_sync(unsigned mask, T val, unsigned delta, hypre_int width = HYPRE_WARP_SIZE)
+T __shfl_down_sync(unsigned mask, T val, unsigned delta, int width = HYPRE_WARP_SIZE)
 {
    return __shfl_down(val, delta, width);
 }
 
 template <typename T>
 static __device__ __forceinline__
-T warp_shuffle_down_sync(hypre_DeviceItem &item, unsigned mask, T val, hypre_int delta,
-                         hypre_int width = HYPRE_WARP_SIZE)
+T warp_shuffle_down_sync(hypre_DeviceItem &item, unsigned mask, T val, int delta,
+                         int width = HYPRE_WARP_SIZE)
 {
    return __shfl_down_sync(mask, val, delta, width);
 }
@@ -295,7 +240,7 @@ static __device__ __forceinline__
 T warp_reduce_sum(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
    {
       in += __shfl_down_sync(HYPRE_WARP_FULL_MASK, in, d);
    }
@@ -314,12 +259,12 @@ hypre_GetDefaultDeviceBlockDimension()
  *--------------------------------------------------------------------*/
 
 dim3
-hypre_GetDefaultDeviceGridDimension( HYPRE_Int   n,
+hypre_GetDefaultDeviceGridDimension( int   n,
                                      const char *granularity,
                                      dim3        bDim )
 {
-   HYPRE_Int num_blocks = 0;
-   HYPRE_Int num_threads_per_block = bDim.x * bDim.y * bDim.z;
+   int num_blocks = 0;
+   int num_threads_per_block = bDim.x * bDim.y * bDim.z;
 
    if (granularity[0] == 't')
    {
@@ -327,7 +272,7 @@ hypre_GetDefaultDeviceGridDimension( HYPRE_Int   n,
    }
    else if (granularity[0] == 'w')
    {
-      HYPRE_Int num_warps_per_block = num_threads_per_block >> HYPRE_WARP_BITSHIFT;
+      int num_warps_per_block = num_threads_per_block >> HYPRE_WARP_BITSHIFT;
 
       assert(num_warps_per_block * HYPRE_WARP_SIZE == num_threads_per_block);
 
@@ -339,8 +284,7 @@ hypre_GetDefaultDeviceGridDimension( HYPRE_Int   n,
       assert(0);
    }
 
-   dim3 gDim = hypre_dim3(num_blocks);
-
+   dim3 gDim = dim3(num_blocks);
    return gDim;
 }
 
@@ -369,92 +313,31 @@ hypre_GetDefaultDeviceGridDimension( HYPRE_Int   n,
 
 #define HYPRE_GPU_LAUNCH(kernel_name, gridsize, blocksize, ...) HYPRE_GPU_LAUNCH2(kernel_name, gridsize, blocksize, 0, __VA_ARGS__)
 
-// HYPRE_Int
-// hypre_SpGemmCreateGlobalHashTable( HYPRE_Int       num_rows,        /* number of rows */
-//                                    HYPRE_Int      *row_id,          /* row_id[i] is index of ith row; i if row_id == NULL */
-//                                    HYPRE_Int       num_ghash,       /* number of hash tables <= num_rows */
-//                                    HYPRE_Int      *row_sizes,       /* row_sizes[rowid[i]] is the size of ith row */
-//                                    HYPRE_Int       SHMEM_HASH_SIZE,
-//                                    HYPRE_Int     **ghash_i_ptr,     /* of length num_ghash + 1 */
-//                                    HYPRE_Int     **ghash_j_ptr,
-//                                    HYPRE_Complex **ghash_a_ptr,
-//                                    HYPRE_Int      *ghash_size_ptr )
-// {
-//    assert(num_ghash <= num_rows);
-
-//    HYPRE_Int *ghash_i, ghash_size;
-//    dim3 bDim = hypre_GetDefaultDeviceBlockDimension();
-
-// 	hipMalloc((void **)&ghash_i, sizeof(HYPRE_Int)*(num_ghash + 1));
-//    //ghash_i = hypre_TAlloc(HYPRE_Int, num_ghash + 1, HYPRE_MEMORY_DEVICE);
-// 	hipMemset(ghash_i, 0, sizeof(HYPRE_Int)*(num_ghash + 1));
-//    //hypre_Memset(ghash_i + num_ghash, 0, sizeof(HYPRE_Int), HYPRE_MEMORY_DEVICE);
-//    dim3 gDim = hypre_GetDefaultDeviceGridDimension(num_ghash, "thread", bDim);
-//    HYPRE_GPU_LAUNCH( hypre_SpGemmGhashSize, gDim, bDim,
-//                      num_rows, row_id, num_ghash, row_sizes, ghash_i, SHMEM_HASH_SIZE );
-
-// 	thrust::exclusive_scan(ghash_i, ghash_i + num_ghash + 1, ghash_i);
-
-// 	hipMemcpy(&ghash_size, ghash_i + num_ghash, sizeof(HYPRE_Int), hipMemcpyDeviceToHost);
-//    //hypre_TMemcpy(&ghash_size, ghash_i + num_ghash, HYPRE_Int, 1, HYPRE_MEMORY_HOST,
-// 	//             HYPRE_MEMORY_DEVICE);
-
-//    if (!ghash_size)
-//    {
-//       hipFree(ghash_i);  assert(ghash_i == NULL);
-//    }
-
-//    if (ghash_i_ptr)
-//    {
-//       *ghash_i_ptr = ghash_i;
-//    }
-
-//    if (ghash_j_ptr)
-//    {
-// 		hipMalloc((void **)&ghash_j_ptr , sizeof(HYPRE_Int)*ghash_size);
-//       //*ghash_j_ptr = hypre_TAlloc(HYPRE_Int, ghash_size, HYPRE_MEMORY_DEVICE);
-//    }
-
-//    if (ghash_a_ptr)
-//    {
-// 		hipMalloc((void **)&ghash_a_ptr , sizeof(HYPRE_Complex)*ghash_size);
-//       //*ghash_a_ptr = hypre_TAlloc(HYPRE_Complex, ghash_size, HYPRE_MEMORY_DEVICE);
-//    }
-
-//    if (ghash_size_ptr)
-//    {
-//       *ghash_size_ptr = ghash_size;
-//    }
-
-//    return 0;
-// }
-// *
-
 /* the number of groups in block */
 static __device__ __forceinline__
-hypre_int get_num_groups(hypre_DeviceItem &item)
+int get_num_groups(hypre_DeviceItem &item)
 {
    return blockDim.z;
 }
 
 /* the group id in the block */
 static __device__ __forceinline__
-hypre_int get_group_id(hypre_DeviceItem &item)
+int get_group_id(hypre_DeviceItem &item)
 {
    return threadIdx.z;
 }
 
 /* the thread id (lane) in the group */
 static __device__ __forceinline__
-hypre_int get_group_lane_id(hypre_DeviceItem &item)
+int get_group_lane_id(hypre_DeviceItem &item)
 {
    return hypre_gpu_get_thread_id<2>(item);
 }
 
 /* the warp id in the group */
-template <HYPRE_Int GROUP_SIZE>
+template <int GROUP_SIZE>
 static __device__ __forceinline__
-hypre_int get_warp_in_group_id(hypre_DeviceItem &item)
+int get_warp_in_group_id(hypre_DeviceItem &item)
 {
    if (GROUP_SIZE <= HYPRE_WARP_SIZE)
    {
@@ -469,16 +352,16 @@ hypre_int get_warp_in_group_id(hypre_DeviceItem &item)
 /* group reads 2 values from ptr to v1 and v2
  * GROUP_SIZE must be >= 2
  */
-template <HYPRE_Int GROUP_SIZE>
+template <int GROUP_SIZE>
 static __device__ __forceinline__
-void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HYPRE_Int &v1,
-                HYPRE_Int &v2)
+void group_read(hypre_DeviceItem &item, const int *ptr, bool valid_ptr, int &v1,
+                int &v2)
 {
    if (GROUP_SIZE >= HYPRE_WARP_SIZE)
    {
       /* lane = warp_lane
        * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const HYPRE_Int lane = hypre_gpu_get_lane_id<2>(item);
+      const int lane = hypre_gpu_get_lane_id<2>(item);
 
       if (lane < 2)
       {
@@ -490,7 +373,7 @@ void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HY
    else
    {
       /* lane = group_lane */
-      const HYPRE_Int lane = get_group_lane_id(item);
+      const int lane = get_group_lane_id(item);
 
       if (valid_ptr && lane < 2)
       {
@@ -504,15 +387,15 @@ void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HY
 /* group reads a value from ptr to v1
  * GROUP_SIZE must be >= 2
  */
-template <HYPRE_Int GROUP_SIZE>
+template <int GROUP_SIZE>
 static __device__ __forceinline__
-void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HYPRE_Int &v1)
+void group_read(hypre_DeviceItem &item, const int *ptr, bool valid_ptr, int &v1)
 {
    if (GROUP_SIZE >= HYPRE_WARP_SIZE)
    {
       /* lane = warp_lane
        * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const HYPRE_Int lane = hypre_gpu_get_lane_id<2>(item);
+      const int lane = hypre_gpu_get_lane_id<2>(item);
 
       if (!lane)
       {
@@ -523,7 +406,7 @@ void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HY
    else
    {
       /* lane = group_lane */
-      const HYPRE_Int lane = get_group_lane_id(item);
+      const int lane = get_group_lane_id(item);
 
       if (valid_ptr && !lane)
       {
@@ -533,7 +416,7 @@ void group_read(hypre_DeviceItem &item, const HYPRE_Int *ptr, bool valid_ptr, HY
    }
 }
 
-template <typename T, HYPRE_Int NUM_GROUPS_PER_BLOCK, HYPRE_Int GROUP_SIZE>
+template <typename T, int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE>
 static __device__ __forceinline__
 T group_reduce_sum(hypre_DeviceItem &item, T in)
 {
@@ -542,7 +425,7 @@ T group_reduce_sum(hypre_DeviceItem &item, T in)
 #endif
 
 #pragma unroll
-   for (hypre_int d = GROUP_SIZE / 2; d > 0; d >>= 1)
+   for (int d = GROUP_SIZE / 2; d > 0; d >>= 1)
    {
       in += warp_shuffle_down_sync(item, HYPRE_WARP_FULL_MASK, in, d);
    }
@@ -551,7 +434,7 @@ T group_reduce_sum(hypre_DeviceItem &item, T in)
 }
 
 /* s_WarpData[NUM_GROUPS_PER_BLOCK * GROUP_SIZE / HYPRE_WARP_SIZE] */
-template <typename T, HYPRE_Int NUM_GROUPS_PER_BLOCK, HYPRE_Int GROUP_SIZE>
+template <typename T, int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE>
 static __device__ __forceinline__
 T group_reduce_sum(hypre_DeviceItem &item, T in, volatile T *s_WarpData)
 {
@@ -561,8 +444,8 @@ T group_reduce_sum(hypre_DeviceItem &item, T in, volatile T *s_WarpData)
 
    T out = warp_reduce_sum(item, in);
 
-   const HYPRE_Int warp_lane_id = hypre_gpu_get_lane_id<2>(item);
-   const HYPRE_Int warp_id = hypre_gpu_get_warp_id<3>(item);
+   const int warp_lane_id = hypre_gpu_get_lane_id<2>(item);
+   const int warp_id = hypre_gpu_get_warp_id<3>(item);
 
    if (warp_lane_id == 0)
    {
@@ -583,12 +466,12 @@ T group_reduce_sum(hypre_DeviceItem &item, T in, volatile T *s_WarpData)
 }
 
 /* GROUP_SIZE must <= HYPRE_WARP_SIZE */
-template <typename T, HYPRE_Int GROUP_SIZE>
+template <typename T, int GROUP_SIZE>
 static __device__ __forceinline__
-T group_prefix_sum(hypre_DeviceItem &item, hypre_int lane_id, T in, T &all_sum)
+T group_prefix_sum(hypre_DeviceItem &item, int lane_id, T in, T &all_sum)
 {
 #pragma unroll
-   for (hypre_int d = 2; d <= GROUP_SIZE; d <<= 1)
+   for (int d = 2; d <= GROUP_SIZE; d <<= 1)
    {
       T t = warp_shuffle_up_sync(item, HYPRE_WARP_FULL_MASK, in, d >> 1, GROUP_SIZE);
       if ( (lane_id & (d - 1)) == (d - 1) )
@@ -605,7 +488,7 @@ T group_prefix_sum(hypre_DeviceItem &item, hypre_int lane_id, T in, T &all_sum)
    }
 
 #pragma unroll
-   for (hypre_int d = GROUP_SIZE >> 1; d > 0; d >>= 1)
+   for (int d = GROUP_SIZE >> 1; d > 0; d >>= 1)
    {
       T t = warp_shuffle_xor_sync(item, HYPRE_WARP_FULL_MASK, in, d, GROUP_SIZE);
 
@@ -624,7 +507,7 @@ T group_prefix_sum(hypre_DeviceItem &item, hypre_int lane_id, T in, T &all_sum)
    return in;
 }
 
-template <HYPRE_Int GROUP_SIZE>
+template <int GROUP_SIZE>
 static __device__ __forceinline__
 void group_sync(hypre_DeviceItem &item)
 {
@@ -640,7 +523,7 @@ void group_sync(hypre_DeviceItem &item)
 
 /* Hash functions */
 static __device__ __forceinline__
-HYPRE_Int Hash2Func(HYPRE_Int key)
+int Hash2Func(int key)
 {
    //return ( (key << 1) | 1 );
    //TODO: 6 --> should depend on hash1 size
@@ -649,9 +532,9 @@ HYPRE_Int Hash2Func(HYPRE_Int key)
 
 template <char HASHTYPE>
 static __device__ __forceinline__
-HYPRE_Int HashFunc(HYPRE_Int m, HYPRE_Int key, HYPRE_Int i, HYPRE_Int prev)
+int HashFunc(int m, int key, int i, int prev)
 {
-   HYPRE_Int hashval = 0;
+   int hashval = 0;
 
    /* assume m is power of 2 */
    if (HASHTYPE == 'L')
@@ -673,11 +556,11 @@ HYPRE_Int HashFunc(HYPRE_Int m, HYPRE_Int key, HYPRE_Int i, HYPRE_Int prev)
    return hashval;
 }
 
-template <HYPRE_Int SHMEM_HASH_SIZE, char HASHTYPE>
+template <int SHMEM_HASH_SIZE, char HASHTYPE>
 static __device__ __forceinline__
-HYPRE_Int HashFunc(HYPRE_Int key, HYPRE_Int i, HYPRE_Int prev)
+int HashFunc(int key, int i, int prev)
 {
-   HYPRE_Int hashval = 0;
+   int hashval = 0;
 
    /* assume m is power of 2 */
    if (HASHTYPE == 'L')
@@ -700,19 +583,19 @@ HYPRE_Int HashFunc(HYPRE_Int key, HYPRE_Int i, HYPRE_Int prev)
 }
 
 
-template <HYPRE_Int SHMEM_HASH_SIZE, char HASHTYPE, HYPRE_Int UNROLL_FACTOR>
+template <int SHMEM_HASH_SIZE, char HASHTYPE, int UNROLL_FACTOR>
 static __device__ __forceinline__
-HYPRE_Int
+int
 hypre_spgemm_hash_insert_symbl(
-   volatile HYPRE_Int *HashKeys,
-   HYPRE_Int           key,
-   HYPRE_Int          &count )
+   volatile int *HashKeys,
+   int           key,
+   int          &count )
 {
-   HYPRE_Int j = 0;
-   HYPRE_Int old = -1;
+   int j = 0;
+   int old = -1;
 
 #pragma unroll UNROLL_FACTOR
-   for (HYPRE_Int i = 0; i < SHMEM_HASH_SIZE; i++)
+   for (int i = 0; i < SHMEM_HASH_SIZE; i++)
    {
       /* compute the hash value of key */
       if (i == 0)
@@ -726,7 +609,7 @@ hypre_spgemm_hash_insert_symbl(
       }
 
       /* try to insert key+1 into slot j */
-      old = atomicCAS((HYPRE_Int*)(HashKeys + j), -1, key);
+      old = atomicCAS((int*)(HashKeys + j), -1, key);
       if (old == -1)
       {
          count++;
@@ -742,16 +625,16 @@ hypre_spgemm_hash_insert_symbl(
 
 template <char HASHTYPE>
 static __device__ __forceinline__
-HYPRE_Int
-hypre_spgemm_hash_insert_symbl( HYPRE_Int           HashSize,
-                                volatile HYPRE_Int *HashKeys,
-                                HYPRE_Int           key,
-                                HYPRE_Int          &count )
+int
+hypre_spgemm_hash_insert_symbl( int           HashSize,
+                                volatile int *HashKeys,
+                                int           key,
+                                int          &count )
 {
-   HYPRE_Int j = 0;
-   HYPRE_Int old = -1;
+   int j = 0;
+   int old = -1;
 
-   for (HYPRE_Int i = 0; i < HashSize; i++)
+   for (int i = 0; i < HashSize; i++)
    {
       /* compute the hash value of key */
       if (i == 0)
@@ -764,7 +647,7 @@ hypre_spgemm_hash_insert_symbl( HYPRE_Int           HashSize,
       }
 
       /* try to insert key+1 into slot j */
-      old = atomicCAS((HYPRE_Int*)(HashKeys + j), -1, key);
+      old = atomicCAS((int*)(HashKeys + j), -1, key);
 
       if (old == -1)
       {
@@ -779,31 +662,31 @@ hypre_spgemm_hash_insert_symbl( HYPRE_Int           HashSize,
    return -1;
 }
 
-template <HYPRE_Int SHMEM_HASH_SIZE, char HASHTYPE, HYPRE_Int GROUP_SIZE, bool HAS_GHASH, bool IA1, HYPRE_Int UNROLL_FACTOR>
+template <int SHMEM_HASH_SIZE, char HASHTYPE, int GROUP_SIZE, bool HAS_GHASH, bool IA1, int UNROLL_FACTOR>
 static __device__ __forceinline__
-HYPRE_Int
+int
 hypre_spgemm_compute_row_symbl( hypre_DeviceItem   &item,
-                                HYPRE_Int           istart_a,
-                                HYPRE_Int           iend_a,
-                                const HYPRE_Int    *ja,
-                                const HYPRE_Int    *ib,
-                                const HYPRE_Int    *jb,
-                                volatile HYPRE_Int *s_HashKeys,
-                                HYPRE_Int           g_HashSize,
-                                HYPRE_Int          *g_HashKeys,
+                                int           istart_a,
+                                int           iend_a,
+                                const int    *ja,
+                                const int    *ib,
+                                const int    *jb,
+                                volatile int *s_HashKeys,
+                                int           g_HashSize,
+                                int          *g_HashKeys,
                                 char               &failed )
 {
-   HYPRE_Int threadIdx_x = threadIdx.x;
-   HYPRE_Int threadIdx_y = threadIdx.y;
-   HYPRE_Int blockDim_x = blockDim.x;
-   HYPRE_Int blockDim_y = blockDim.y;
-   HYPRE_Int num_new_insert = 0;
+   int threadIdx_x = threadIdx.x;
+   int threadIdx_y = threadIdx.y;
+   int blockDim_x = blockDim.x;
+   int blockDim_y = blockDim.y;
+   int num_new_insert = 0;
 
    /* load column idx and values of row i of A */
-   for (HYPRE_Int i = istart_a + threadIdx_y; warp_any_sync(item, HYPRE_WARP_FULL_MASK, i < iend_a);
+   for (int i = istart_a + threadIdx_y; warp_any_sync(item, HYPRE_WARP_FULL_MASK, i < iend_a);
         i += blockDim_y)
    {
-      HYPRE_Int rowB = -1;
+      int rowB = -1;
 
       if (threadIdx_x == 0 && i < iend_a)
       {
@@ -811,24 +694,24 @@ hypre_spgemm_compute_row_symbl( hypre_DeviceItem   &item,
       }
 
 #if 0
-      //const HYPRE_Int ymask = get_mask<4>(...);
+      //const int ymask = get_mask<4>(...);
       // TODO: need to confirm the behavior of __ballot_sync, leave it here for now
-      //const HYPRE_Int num_valid_rows = __popc(__ballot_sync(ymask, valid_i));
-      //for (HYPRE_Int j = 0; j < num_valid_rows; j++)
+      //const int num_valid_rows = __popc(__ballot_sync(ymask, valid_i));
+      //for (int j = 0; j < num_valid_rows; j++)
 #endif
 
       /* threads in the same ygroup work on one row together */
       rowB = warp_shuffle_sync(item, HYPRE_WARP_FULL_MASK, rowB, 0, blockDim_x);
       /* open this row of B, collectively */
-      HYPRE_Int tmp = 0;
+      int tmp = 0;
       if (rowB != -1 && threadIdx_x < 2)
       {
          tmp = read_only_load(ib + rowB + threadIdx_x);
       }
-      const HYPRE_Int rowB_start = warp_shuffle_sync(item, HYPRE_WARP_FULL_MASK, tmp, 0, blockDim_x);
-      const HYPRE_Int rowB_end   = warp_shuffle_sync(item, HYPRE_WARP_FULL_MASK, tmp, 1, blockDim_x);
+      const int rowB_start = warp_shuffle_sync(item, HYPRE_WARP_FULL_MASK, tmp, 0, blockDim_x);
+      const int rowB_end   = warp_shuffle_sync(item, HYPRE_WARP_FULL_MASK, tmp, 1, blockDim_x);
 
-      for (HYPRE_Int k = rowB_start + threadIdx_x;
+      for (int k = rowB_start + threadIdx_x;
            warp_any_sync(item, HYPRE_WARP_FULL_MASK, k < rowB_end);
            k += blockDim_x)
       {
@@ -840,9 +723,9 @@ hypre_spgemm_compute_row_symbl( hypre_DeviceItem   &item,
             }
             else
             {
-               const HYPRE_Int k_idx = read_only_load(jb + k);
+               const int k_idx = read_only_load(jb + k);
                /* first try to insert into shared memory hash table */
-               HYPRE_Int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, HASHTYPE, UNROLL_FACTOR>
+               int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, HASHTYPE, UNROLL_FACTOR>
                                (s_HashKeys, k_idx, num_new_insert);
 
                if (HAS_GHASH && -1 == pos)
@@ -866,41 +749,41 @@ hypre_spgemm_compute_row_symbl( hypre_DeviceItem   &item,
    return num_new_insert;
 }
 
-template <HYPRE_Int NUM_GROUPS_PER_BLOCK, HYPRE_Int GROUP_SIZE, HYPRE_Int SHMEM_HASH_SIZE, bool HAS_RIND,
+template <int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE, int SHMEM_HASH_SIZE, bool HAS_RIND,
           bool CAN_FAIL, char HASHTYPE, bool HAS_GHASH>
 __global__ void
 hypre_spgemm_symbolic( hypre_DeviceItem             &item,
-                       const HYPRE_Int               M,
-                       const HYPRE_Int* __restrict__ rind,
-                       const HYPRE_Int* __restrict__ ia,
-                       const HYPRE_Int* __restrict__ ja,
-                       const HYPRE_Int* __restrict__ ib,
-                       const HYPRE_Int* __restrict__ jb,
-                       const HYPRE_Int* __restrict__ ig,
-                       HYPRE_Int*       __restrict__ jg,
-                       HYPRE_Int*       __restrict__ rc,
+                       const int               M,
+                       const int* __restrict__ rind,
+                       const int* __restrict__ ia,
+                       const int* __restrict__ ja,
+                       const int* __restrict__ ib,
+                       const int* __restrict__ jb,
+                       const int* __restrict__ ig,
+                       int*       __restrict__ jg,
+                       int*       __restrict__ rc,
                        char*            __restrict__ rf )
 {
    /* number of groups in the grid */
-   volatile const HYPRE_Int grid_num_groups = get_num_groups(item) * gridDim.x;
+   volatile const int grid_num_groups = get_num_groups(item) * gridDim.x;
    /* group id inside the block */
-   volatile const HYPRE_Int group_id = get_group_id(item);
+   volatile const int group_id = get_group_id(item);
    /* group id in the grid */
-   volatile const HYPRE_Int grid_group_id = blockIdx.x * get_num_groups(item) + group_id;
+   volatile const int grid_group_id = blockIdx.x * get_num_groups(item) + group_id;
    /* lane id inside the group */
-   volatile const HYPRE_Int lane_id = get_group_lane_id(item);
+   volatile const int lane_id = get_group_lane_id(item);
    /* shared memory hash table */
 #if defined(HYPRE_SPGEMM_DEVICE_USE_DSHMEM)
-   extern __shared__ volatile HYPRE_Int shared_mem[];
-   volatile HYPRE_Int *s_HashKeys = shared_mem;
+   extern __shared__ volatile int shared_mem[];
+   volatile int *s_HashKeys = shared_mem;
 #else
-   __shared__ volatile HYPRE_Int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
+   __shared__ volatile int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
 #endif
    /* shared memory hash table for this group */
-   volatile HYPRE_Int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
+   volatile int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
 
-   //const HYPRE_Int UNROLL_FACTOR = min(HYPRE_SPGEMM_SYMBL_UNROLL, SHMEM_HASH_SIZE);
-   HYPRE_Int valid_ptr;
+   //const int UNROLL_FACTOR = min(HYPRE_SPGEMM_SYMBL_UNROLL, SHMEM_HASH_SIZE);
+   int valid_ptr;
 
 #if defined(HYPRE_DEBUG)
    hypre_device_assert(blockDim.x * blockDim.y == GROUP_SIZE);
@@ -909,12 +792,12 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
    /* WM: note - in cuda/hip, exited threads are not required to reach collective calls like
     *            syncthreads(), but this is not true for sycl (all threads must call the collective).
     *            Thus, all threads in the block must enter the loop (which is not ensured for cuda). */
-   for (HYPRE_Int i = grid_group_id; warp_any_sync(item, HYPRE_WARP_FULL_MASK, i < M);
+   for (int i = grid_group_id; warp_any_sync(item, HYPRE_WARP_FULL_MASK, i < M);
         i += grid_num_groups)
    {
       valid_ptr = GROUP_SIZE >= HYPRE_WARP_SIZE || i < M;
 
-      HYPRE_Int ii = -1;
+      int ii = -1;
       char failed = 0;
 
       if (HAS_RIND)
@@ -927,7 +810,7 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
       }
 
       /* start/end position of global memory hash table */
-      HYPRE_Int istart_g = 0, iend_g = 0, ghash_size = 0;
+      int istart_g = 0, iend_g = 0, ghash_size = 0;
 
       if (HAS_GHASH)
       {
@@ -939,7 +822,7 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
          ghash_size = iend_g - istart_g;
 
          /* initialize group's global memory hash table */
-         for (HYPRE_Int k = lane_id; k < ghash_size; k += GROUP_SIZE)
+         for (int k = lane_id; k < ghash_size; k += GROUP_SIZE)
          {
             jg[istart_g + k] = -1;
          }
@@ -951,7 +834,7 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
 			if (HYPRE_SPGEMM_SYMBL_UNROLL<SHMEM_HASH_SIZE)
 			{
 #pragma unroll HYPRE_SPGEMM_SYMBL_UNROLL
-				for (HYPRE_Int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
+				for (int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
 				{
 					group_s_HashKeys[k] = -1;
 				}
@@ -959,7 +842,7 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
 			else
 			{
 #pragma unroll SHMEM_HASH_SIZE
-				for (HYPRE_Int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
+				for (int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
 				{
 					group_s_HashKeys[k] = -1;
 				}
@@ -969,13 +852,13 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
       group_sync<GROUP_SIZE>(item);
 
       /* start/end position of row of A */
-      HYPRE_Int istart_a = 0, iend_a = 0;
+      int istart_a = 0, iend_a = 0;
 
       /* load the start and end position of row ii of A */
       group_read<GROUP_SIZE>(item, ia + ii, valid_ptr, istart_a, iend_a);
 
       /* work with two hash tables */
-      HYPRE_Int jsum;
+      int jsum;
 
       if (iend_a == istart_a + 1)
       {
@@ -1003,13 +886,13 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
        * use s_HashKeys as shared memory workspace */
       if (GROUP_SIZE <= HYPRE_WARP_SIZE)
       {
-         jsum = group_reduce_sum<HYPRE_Int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item, jsum);
+         jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item, jsum);
       }
       else
       {
          group_sync<GROUP_SIZE>(item);
 
-         jsum = group_reduce_sum<HYPRE_Int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item, jsum, s_HashKeys);
+         jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item, jsum, s_HashKeys);
       }
 
       /* if this row failed */
@@ -1017,14 +900,14 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
       {
          if (GROUP_SIZE <= HYPRE_WARP_SIZE)
          {
-            failed = (char) group_reduce_sum<hypre_int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item,
-                                                                                          (hypre_int) failed);
+            failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item,
+                                                                                          (int) failed);
          }
          else
          {
          group_sync<GROUP_SIZE>(item);
-            failed = (char) group_reduce_sum<hypre_int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item,
-                                                                                          (hypre_int) failed,
+            failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(item,
+                                                                                          (int) failed,
                                                                                           s_HashKeys);
          }
       }
@@ -1044,20 +927,20 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
    }
 }
 
-template <HYPRE_Int SHMEM_HASH_SIZE, HYPRE_Int GROUP_SIZE>
-HYPRE_Int hypre_spgemm_symbolic_max_num_blocks( HYPRE_Int  multiProcessorCount,
-                                                HYPRE_Int *num_blocks_ptr,
-                                                HYPRE_Int *block_size_ptr )
+template <int SHMEM_HASH_SIZE, int GROUP_SIZE>
+int hypre_spgemm_symbolic_max_num_blocks( int  multiProcessorCount,
+                                                int *num_blocks_ptr,
+                                                int *block_size_ptr )
 {
    const char HASH_TYPE = HYPRE_SPGEMM_HASH_TYPE;
-   const HYPRE_Int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
-   const HYPRE_Int block_size = num_groups_per_block * GROUP_SIZE;
-   hypre_int numBlocksPerSm = 0;
+   const int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
+   const int block_size = num_groups_per_block * GROUP_SIZE;
+   int numBlocksPerSm = 0;
 #if defined(HYPRE_SPGEMM_DEVICE_USE_DSHMEM)
-   const hypre_int shmem_bytes = num_groups_per_block * SHMEM_HASH_SIZE * sizeof(HYPRE_Int);
-   hypre_int dynamic_shmem_size = shmem_bytes;
+   const int shmem_bytes = num_groups_per_block * SHMEM_HASH_SIZE * sizeof(int);
+   int dynamic_shmem_size = shmem_bytes;
 #else
-   hypre_int dynamic_shmem_size = 0;
+   int dynamic_shmem_size = 0;
 #endif
 
    hipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -1071,35 +954,35 @@ HYPRE_Int hypre_spgemm_symbolic_max_num_blocks( HYPRE_Int  multiProcessorCount,
    return 0;
 }
 
-template <HYPRE_Int BIN, HYPRE_Int SHMEM_HASH_SIZE, HYPRE_Int GROUP_SIZE, bool HAS_RIND>
-HYPRE_Int
-hypre_spgemm_symbolic_rownnz( HYPRE_Int  m,
-                              HYPRE_Int *row_ind, /* input: row indices (length of m) */
-                              HYPRE_Int  k,
-                              HYPRE_Int  n,
+template <int BIN, int SHMEM_HASH_SIZE, int GROUP_SIZE, bool HAS_RIND>
+int
+hypre_spgemm_symbolic_rownnz( int  m,
+                              int *row_ind, /* input: row indices (length of m) */
+                              int  k,
+                              int  n,
                               bool       need_ghash,
-                              HYPRE_Int *d_ia,
-                              HYPRE_Int *d_ja,
-                              HYPRE_Int *d_ib,
-                              HYPRE_Int *d_jb,
-                              HYPRE_Int *d_rc,
+                              int *d_ia,
+                              int *d_ja,
+                              int *d_ib,
+                              int *d_jb,
+                              int *d_rc,
                               bool       can_fail,
                               char      *d_rf  /* output: if symbolic mult. failed for each row */ )
 {
-   //const HYPRE_Int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
-	constexpr HYPRE_Int num_groups_per_block = 16;
-   const HYPRE_Int BDIMX                = std::min(2, GROUP_SIZE);
-   const HYPRE_Int BDIMY                = GROUP_SIZE / BDIMX;
+   //const int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
+	constexpr int num_groups_per_block = 16;
+   const int BDIMX                = std::min(2, GROUP_SIZE);
+   const int BDIMY                = GROUP_SIZE / BDIMX;
 
    /* CUDA kernel configurations: bDim.z is the number of groups in block */
    dim3 bDim(BDIMX, BDIMY, num_groups_per_block);
 	assert(bDim.x * bDim.y == GROUP_SIZE);
    // grid dimension (number of blocks)
-   const HYPRE_Int num_blocks = 220; //std::min( hypre_SpgemmBlockNumDim()[0][BIN],
-	//    (HYPRE_Int) ((m + bDim.z - 1) / bDim.z) );
+   const int num_blocks = 220; //std::min( hypre_SpgemmBlockNumDim()[0][BIN],
+	//    (int) ((m + bDim.z - 1) / bDim.z) );
    dim3 gDim( num_blocks );
    // number of active groups
-   //HYPRE_Int num_act_groups = std::min((HYPRE_Int) (bDim.z * gDim.x), m);
+   //int num_act_groups = std::min((int) (bDim.z * gDim.x), m);
 
    const char HASH_TYPE = HYPRE_SPGEMM_HASH_TYPE;
    if (HASH_TYPE != 'L' && HASH_TYPE != 'Q' && HASH_TYPE != 'D')
@@ -1110,9 +993,9 @@ hypre_spgemm_symbolic_rownnz( HYPRE_Int  m,
    /* ---------------------------------------------------------------------------
     * build hash table (no values)
     * ---------------------------------------------------------------------------*/
-   HYPRE_Int *d_ghash_i = NULL;
-   HYPRE_Int *d_ghash_j = NULL;
-   HYPRE_Int  ghash_size = 0;
+   int *d_ghash_i = NULL;
+   int *d_ghash_j = NULL;
+   int  ghash_size = 0;
 
    // if (need_ghash)
    // {
@@ -1179,54 +1062,54 @@ hypre_spgemm_symbolic_rownnz( HYPRE_Int  m,
 }
 
 
-void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, HYPRE_Int ** drows, HYPRE_Int ** dcols, HYPRE_Int n)
+void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int ** drows, int ** dcols, int n)
 {
 	printf("rows_name=%s, cols_name=%s\n",rows_name, cols_name);
-	HYPRE_Int * hrows = (HYPRE_Int *)malloc(n*sizeof(HYPRE_Int));
+	int * hrows = (int *)malloc(n*sizeof(int));
 	FILE * fid = fopen(rows_name,"rb");
-	fread(hrows, sizeof(HYPRE_Int), n, fid);
+	fread(hrows, sizeof(int), n, fid);
 	fclose(fid);
-	HYPRE_Int nnz = hrows[n-1];
+	int nnz = hrows[n-1];
 	printf("n=%d, nnz=%d\n",n,nnz);
-	hipMalloc((void **)drows, n*sizeof(HYPRE_Int));
-	hipMemcpy(*drows, hrows, n*sizeof(HYPRE_Int), hipMemcpyHostToDevice);
+	hipMalloc((void **)drows, n*sizeof(int));
+	hipMemcpy(*drows, hrows, n*sizeof(int), hipMemcpyHostToDevice);
 	free(hrows);
 
-	HYPRE_Int * hcols = (HYPRE_Int *)malloc(nnz*sizeof(HYPRE_Int));
+	int * hcols = (int *)malloc(nnz*sizeof(int));
 	fid = fopen(cols_name,"rb");
-	fread(hcols, sizeof(HYPRE_Int), nnz, fid);
+	fread(hcols, sizeof(int), nnz, fid);
 	fclose(fid);
 
-	hipMalloc((void **)dcols, nnz*sizeof(HYPRE_Int));
-	hipMemcpy(*dcols, hcols, nnz*sizeof(HYPRE_Int), hipMemcpyHostToDevice);
+	hipMalloc((void **)dcols, nnz*sizeof(int));
+	hipMemcpy(*dcols, hcols, nnz*sizeof(int), hipMemcpyHostToDevice);
 	free(hcols);
 	return;
 }
 
 int main(int argc, char * argv[])
 {
-   HYPRE_Int  m=245635;
-	HYPRE_Int  k=786432;
-	HYPRE_Int  n=245635;
-	HYPRE_Int *d_ia;
-	HYPRE_Int *d_ja;
-	HYPRE_Int *d_ib;
-	HYPRE_Int *d_jb;
-	HYPRE_Int  in_rc=0;
-	HYPRE_Int *d_rc;
+   int  m=245635;
+	int  k=786432;
+	int  n=245635;
+	int *d_ia;
+	int *d_ja;
+	int *d_ib;
+	int *d_jb;
+	int  in_rc=0;
+	int *d_rc;
 	char      *d_rf;
 
 	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &d_ia, &d_ja, m+1);
 	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &d_ib, &d_jb, k+1);
 
-	hipMalloc((void **)&d_rc, m*sizeof(HYPRE_Int));
-	hipMemset(d_rc, 0, m*sizeof(HYPRE_Int));
+	hipMalloc((void **)&d_rc, m*sizeof(int));
+	hipMemset(d_rc, 0, m*sizeof(int));
 	hipMalloc((void **)&d_rf, m*sizeof(char));
 	hipMemset(d_rf, 0, m*sizeof(char));
 
-   constexpr HYPRE_Int SHMEM_HASH_SIZE = SYMBL_HASH_SIZE[5];
-   constexpr HYPRE_Int GROUP_SIZE = T_GROUP_SIZE[5];
-   const HYPRE_Int BIN = 5;
+   constexpr int SHMEM_HASH_SIZE = SYMBL_HASH_SIZE[5];
+   constexpr int GROUP_SIZE = T_GROUP_SIZE[5];
+   const int BIN = 5;
 
    const bool need_ghash = in_rc > 0;
    const bool can_fail = in_rc < 2;
@@ -1240,7 +1123,7 @@ int main(int argc, char * argv[])
 		char * h_rf = (char *) malloc(m*sizeof(char));
 		hipMemcpy(h_rf, d_rf, m*sizeof(char), hipMemcpyDeviceToHost);
 
-		HYPRE_Int num_failed_rows = 0;
+		int num_failed_rows = 0;
 		for (int i=0; i<m; ++i)
 		{
 			if (h_rf[i]==1) num_failed_rows++;
