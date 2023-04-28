@@ -70,21 +70,6 @@ int hypre_gpu_get_num_warps()
    return hypre_gpu_get_num_threads<dim>() >> HYPRE_WARP_BITSHIFT;
 }
 
-/* return the warp id in block */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_warp_id()
-{
-   return hypre_gpu_get_thread_id<dim>() >> HYPRE_WARP_BITSHIFT;
-}
-
-/* return the thread lane id in warp */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_lane_id()
-{
-   return hypre_gpu_get_thread_id<dim>() & (HYPRE_WARP_SIZE - 1);
-}
 
 /* return the num of blocks in grid */
 template <int dim>
@@ -148,15 +133,6 @@ int hypre_gpu_get_grid_num_warps()
    return hypre_gpu_get_num_blocks<gdim>() * hypre_gpu_get_num_warps<bdim>();
 }
 
-/* return the flattened warp id in grid */
-template <int bdim, int gdim>
-static __device__ __forceinline__
-int hypre_gpu_get_grid_warp_id()
-{
-   return hypre_gpu_get_block_id<gdim>() * hypre_gpu_get_num_warps<bdim>() +
-          hypre_gpu_get_warp_id<bdim>();
-}
-
 template <typename T>
 static __device__ __forceinline__
 T warp_reduce_sum(T in)
@@ -208,13 +184,6 @@ int get_group_id()
    return threadIdx.z;
 }
 
-/* the thread id (lane) in the group */
-static __device__ __forceinline__
-int get_group_lane_id()
-{
-   return hypre_gpu_get_thread_id<2>();
-}
-
 /* the warp id in the group */
 template <int GROUP_SIZE>
 static __device__ __forceinline__
@@ -226,7 +195,7 @@ int get_warp_in_group_id()
    }
    else
    {
-      return hypre_gpu_get_warp_id<2>();
+      return (threadIdx.y * blockDim.x + threadIdx.x) >> HYPRE_WARP_BITSHIFT;
    }
 }
 
@@ -242,7 +211,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
    {
       /* lane = warp_lane
        * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const int lane = hypre_gpu_get_lane_id<2>();
+      const int lane = (threadIdx.y * blockDim.x + threadIdx.x) & (HYPRE_WARP_SIZE - 1);
 
       if (lane < 2)
       {
@@ -254,7 +223,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
    else
    {
       /* lane = group_lane */
-      const int lane = get_group_lane_id();
+      const int lane = threadIdx.y * blockDim.x + threadIdx.x;
 
       if (valid_ptr && lane < 2)
       {
@@ -276,7 +245,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
    {
       /* lane = warp_lane
        * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const int lane = hypre_gpu_get_lane_id<2>();
+      const int lane = (threadIdx.y * blockDim.x + threadIdx.x) & (HYPRE_WARP_SIZE - 1);
 
       if (!lane)
       {
@@ -287,7 +256,7 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
    else
    {
       /* lane = group_lane */
-      const int lane = get_group_lane_id();
+      const int lane = threadIdx.y * blockDim.x + threadIdx.x;
 
       if (valid_ptr && !lane)
       {
@@ -325,8 +294,10 @@ T group_reduce_sum(T in, volatile T *s_WarpData)
 
    T out = warp_reduce_sum(in);
 
-   const int warp_lane_id = hypre_gpu_get_lane_id<2>();
-   const int warp_id = hypre_gpu_get_warp_id<3>();
+	const int warp_lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (HYPRE_WARP_SIZE - 1);
+
+	const int warp_id =(threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x +
+							  threadIdx.x) >> HYPRE_WARP_BITSHIFT;
 
    if (warp_lane_id == 0)
    {
@@ -600,7 +571,7 @@ hypre_spgemm_symbolic( const int               M,
    /* group id in the grid */
    volatile const int grid_group_id = blockIdx.x * get_num_groups() + group_id;
    /* lane id inside the group */
-   volatile const int lane_id = get_group_lane_id();
+   volatile const int lane_id = threadIdx.y * blockDim.x + threadIdx.x;
    /* shared memory hash table */
    __shared__ volatile int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
    /* shared memory hash table for this group */
