@@ -25,114 +25,6 @@ hypre_spgemm_get_num_groups_per_block()
 }
 
 
-/* return the number of threads in block */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_num_threads()
-{
-   switch (dim)
-   {
-      case 1:
-         return (blockDim.x);
-      case 2:
-         return (blockDim.x * blockDim.y);
-      case 3:
-         return (blockDim.x * blockDim.y * blockDim.z);
-   }
-
-   return -1;
-}
-
-/* return the flattened thread id in block */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_thread_id()
-{
-   switch (dim)
-   {
-      case 1:
-         return (threadIdx.x);
-      case 2:
-         return (threadIdx.y * blockDim.x + threadIdx.x);
-      case 3:
-         return (threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x +
-                 threadIdx.x);
-   }
-
-   return -1;
-}
-
-/* return the number of warps in block */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_num_warps()
-{
-   return hypre_gpu_get_num_threads<dim>() >> HYPRE_WARP_BITSHIFT;
-}
-
-
-/* return the num of blocks in grid */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_num_blocks()
-{
-   switch (dim)
-   {
-      case 1:
-         return (gridDim.x);
-      case 2:
-         return (gridDim.x * gridDim.y);
-      case 3:
-         return (gridDim.x * gridDim.y * gridDim.z);
-   }
-
-   return -1;
-}
-
-/* return the flattened block id in grid */
-template <int dim>
-static __device__ __forceinline__
-int hypre_gpu_get_block_id()
-{
-   switch (dim)
-   {
-      case 1:
-         return (blockIdx.x);
-      case 2:
-         return (blockIdx.y * gridDim.x + blockIdx.x);
-      case 3:
-         return (blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x +
-                 blockIdx.x);
-   }
-
-   return -1;
-}
-
-/* return the number of threads in grid */
-template <int bdim, int gdim>
-static __device__ __forceinline__
-int hypre_gpu_get_grid_num_threads()
-{
-   return hypre_gpu_get_num_blocks<gdim>() * hypre_gpu_get_num_threads<bdim>();
-}
-
-/* return the flattened thread id in grid */
-template <int bdim, int gdim>
-static __device__ __forceinline__
-int hypre_gpu_get_grid_thread_id()
-{
-   return hypre_gpu_get_block_id<gdim>() * hypre_gpu_get_num_threads<bdim>() +
-          hypre_gpu_get_thread_id<bdim>();
-}
-
-/* return the number of warps in grid */
-template <int bdim, int gdim>
-static __device__ __forceinline__
-int hypre_gpu_get_grid_num_warps()
-{
-   return hypre_gpu_get_num_blocks<gdim>() * hypre_gpu_get_num_warps<bdim>();
-}
-
 template <typename T>
 static __device__ __forceinline__
 T warp_reduce_sum(T in)
@@ -169,20 +61,6 @@ T warp_reduce_sum(T in)
 }
 
 #define HYPRE_GPU_LAUNCH(kernel_name, gridsize, blocksize, ...) HYPRE_GPU_LAUNCH2(kernel_name, gridsize, blocksize, 0, __VA_ARGS__)
-
-/* the number of groups in block */
-static __device__ __forceinline__
-int get_num_groups()
-{
-   return blockDim.z;
-}
-
-/* the group id in the block */
-static __device__ __forceinline__
-int get_group_id()
-{
-   return threadIdx.z;
-}
 
 /* the warp id in the group */
 template <int GROUP_SIZE>
@@ -565,11 +443,11 @@ hypre_spgemm_symbolic( const int               M,
                        char*            __restrict__ rf )
 {
    /* number of groups in the grid */
-   volatile const int grid_num_groups = get_num_groups() * gridDim.x;
+   volatile const int grid_num_groups = blockDim.z * gridDim.x;
    /* group id inside the block */
-   volatile const int group_id = get_group_id();
+   volatile const int group_id = threadIdx.z;
    /* group id in the grid */
-   volatile const int grid_group_id = blockIdx.x * get_num_groups() + group_id;
+   volatile const int grid_group_id = blockIdx.x * blockDim.z + group_id;
    /* lane id inside the group */
    volatile const int lane_id = threadIdx.y * blockDim.x + threadIdx.x;
    /* shared memory hash table */
