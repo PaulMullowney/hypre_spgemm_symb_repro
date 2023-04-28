@@ -1,6 +1,17 @@
 #include "hip_runtime.h"
 #include <cassert>
 
+#define HIP_CALL(call)                                                         \
+  do {                                                                         \
+    hipError_t err = call;                                                     \
+    if (hipSuccess != err) {                                                   \
+      printf("HIP ERROR (code = %d, %s) at %s:%d\n", err,                      \
+             hipGetErrorString(err), __FILE__, __LINE__);                      \
+      assert(0);                                                               \
+      exit(1);                                                                 \
+    }                                                                          \
+  } while (0)
+
 #define HYPRE_WARP_SIZE       64
 #define HYPRE_WARP_BITSHIFT   6
 #define HYPRE_WARP_FULL_MASK  0xFFFFFFFF
@@ -37,30 +48,6 @@ T warp_reduce_sum(T in)
    return in;
 }
 
-
-#if defined(HYPRE_DEBUG)
-#define GPU_LAUNCH_SYNC { hypre_SyncComputeStream(hypre_handle()); hypre_GetDeviceLastError(); }
-#else
-#define GPU_LAUNCH_SYNC
-#endif
-
-#define HYPRE_GPU_LAUNCH2(kernel_name, gridsize, blocksize, shmem_size, ...) \
-{                                                                                                                                   \
-   if ( gridsize.x  == 0 || gridsize.y  == 0 || gridsize.z  == 0 ||                                                                 \
-        blocksize.x == 0 || blocksize.y == 0 || blocksize.z == 0 )                                                                  \
-   {                                                                                                                                \
-      /* printf("Warning %s %d: Zero CUDA grid/block (%d %d %d) (%d %d %d)\n",                                                      \
-                 __FILE__, __LINE__,                                                                                                \
-                 gridsize.x, gridsize.y, gridsize.z, blocksize.x, blocksize.y, blocksize.z); */                                     \
-   }                                                                                                                                \
-   else                                                                                                                             \
-   {                                                                                                                                \
-      (kernel_name) <<< (gridsize), (blocksize), shmem_size, 0 >>> (__VA_ARGS__);                                             \
-      GPU_LAUNCH_SYNC;                                                                                                              \
-   }                                                                                                                                \
-}
-
-#define HYPRE_GPU_LAUNCH(kernel_name, gridsize, blocksize, ...) HYPRE_GPU_LAUNCH2(kernel_name, gridsize, blocksize, 0, __VA_ARGS__)
 
 /* the warp id in the group */
 template <int GROUP_SIZE>
@@ -678,18 +665,15 @@ hypre_spgemm_symbolic_rownnz( int  m,
 
    if (can_fail)
    {
-         HYPRE_GPU_LAUNCH2(
-            (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, true, HASH_TYPE, false>),
-            gDim, bDim, shmem_bytes,
-            m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
+		hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, true, HASH_TYPE, false>
+			<<<gDim, bDim, shmem_bytes, 0>>>(m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
    }
    else
    {
-         HYPRE_GPU_LAUNCH2(
-            (hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, false, HASH_TYPE, false>),
-            gDim, bDim, shmem_bytes,
-            m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
+		hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HAS_RIND, false, HASH_TYPE, false>
+			<<<gDim, bDim, shmem_bytes,0>>>(m, row_ind, d_ia, d_ja, d_ib, d_jb, d_ghash_i, d_ghash_j, d_rc, d_rf );
    }
+	HIP_CALL(hipGetLastError());
 
    return 0;
 }
@@ -704,8 +688,8 @@ void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int *
 	fclose(fid);
 	int nnz = hrows[n-1];
 	printf("n=%d, nnz=%d\n",n,nnz);
-	hipMalloc((void **)drows, n*sizeof(int));
-	hipMemcpy(*drows, hrows, n*sizeof(int), hipMemcpyHostToDevice);
+	HIP_CALL(hipMalloc((void **)drows, n*sizeof(int)));
+	HIP_CALL(hipMemcpy(*drows, hrows, n*sizeof(int), hipMemcpyHostToDevice));
 	free(hrows);
 
 	int * hcols = (int *)malloc(nnz*sizeof(int));
@@ -713,8 +697,8 @@ void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int *
 	fread(hcols, sizeof(int), nnz, fid);
 	fclose(fid);
 
-	hipMalloc((void **)dcols, nnz*sizeof(int));
-	hipMemcpy(*dcols, hcols, nnz*sizeof(int), hipMemcpyHostToDevice);
+	HIP_CALL(hipMalloc((void **)dcols, nnz*sizeof(int)));
+	HIP_CALL(hipMemcpy(*dcols, hcols, nnz*sizeof(int), hipMemcpyHostToDevice));
 	free(hcols);
 	return;
 }
@@ -735,10 +719,10 @@ int main(int argc, char * argv[])
 	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &d_ia, &d_ja, m+1);
 	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &d_ib, &d_jb, k+1);
 
-	hipMalloc((void **)&d_rc, m*sizeof(int));
-	hipMemset(d_rc, 0, m*sizeof(int));
-	hipMalloc((void **)&d_rf, m*sizeof(char));
-	hipMemset(d_rf, 0, m*sizeof(char));
+	HIP_CALL(hipMalloc((void **)&d_rc, m*sizeof(int)));
+	HIP_CALL(hipMemset(d_rc, 0, m*sizeof(int)));
+	HIP_CALL(hipMalloc((void **)&d_rf, m*sizeof(char)));
+	HIP_CALL(hipMemset(d_rf, 0, m*sizeof(char)));
 
    constexpr int SHMEM_HASH_SIZE = SYMBL_HASH_SIZE[5];
    constexpr int GROUP_SIZE = T_GROUP_SIZE[5];
@@ -754,7 +738,7 @@ int main(int argc, char * argv[])
    {
       /* row nnz is exact if no row failed */
 		char * h_rf = (char *) malloc(m*sizeof(char));
-		hipMemcpy(h_rf, d_rf, m*sizeof(char), hipMemcpyDeviceToHost);
+		HIP_CALL(hipMemcpy(h_rf, d_rf, m*sizeof(char), hipMemcpyDeviceToHost));
 
 		int num_failed_rows = 0;
 		for (int i=0; i<m; ++i)
@@ -767,12 +751,12 @@ int main(int argc, char * argv[])
 		free(h_rf);
    }
 
-	hipFree(d_rc);
-	hipFree(d_rf);
+	HIP_CALL(hipFree(d_rc));
+	HIP_CALL(hipFree(d_rf));
 
-	hipFree(d_ia);
-	hipFree(d_ja);
-	hipFree(d_ib);
-	hipFree(d_jb);
+	HIP_CALL(hipFree(d_ia));
+	HIP_CALL(hipFree(d_ja));
+	HIP_CALL(hipFree(d_ib));
+	HIP_CALL(hipFree(d_jb));
    return 0;
 }
