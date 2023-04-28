@@ -6,20 +6,15 @@ using hypre_DeviceItem = void*;
 #define HYPRE_WARP_SIZE       64
 #define HYPRE_WARP_BITSHIFT   6
 #define HYPRE_WARP_FULL_MASK  0xFFFFFFFF
-#define HYPRE_MAX_NUM_WARPS   (64 * 64 * 32)
-#define HYPRE_FLT_LARGE       1e30
 #define HYPRE_1D_BLOCK_SIZE   512
-#define HYPRE_MAX_NUM_STREAMS 10
 #define HYPRE_SPGEMM_MAX_NBIN 10
 
-#define COHEN_USE_SHMEM 0
 static const char HYPRE_SPGEMM_HASH_TYPE = 'D';
 /* bin settings                             0   1   2    3    4    5     6     7     8     9     10 */
 constexpr int SYMBL_HASH_SIZE[11] = { 0, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
 constexpr int T_GROUP_SIZE[11]    = { 0,  2,  4,   8,  16,  32,   64,  128,  256,  512,  1024 };
-#define HYPRE_SPGEMM_DEFAULT_BIN 6
+
 /* unroll factor in the kernels */
-#define HYPRE_SPGEMM_NUMER_UNROLL 256
 #define HYPRE_SPGEMM_SYMBL_UNROLL 512
 
 int                         spgemm_block_num_dim[4][HYPRE_SPGEMM_MAX_NBIN + 1];
@@ -773,12 +768,7 @@ hypre_spgemm_symbolic( hypre_DeviceItem             &item,
    /* lane id inside the group */
    volatile const int lane_id = get_group_lane_id(item);
    /* shared memory hash table */
-#if defined(HYPRE_SPGEMM_DEVICE_USE_DSHMEM)
-   extern __shared__ volatile int shared_mem[];
-   volatile int *s_HashKeys = shared_mem;
-#else
    __shared__ volatile int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
-#endif
    /* shared memory hash table for this group */
    volatile int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
 
@@ -936,12 +926,7 @@ int hypre_spgemm_symbolic_max_num_blocks( int  multiProcessorCount,
    const int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
    const int block_size = num_groups_per_block * GROUP_SIZE;
    int numBlocksPerSm = 0;
-#if defined(HYPRE_SPGEMM_DEVICE_USE_DSHMEM)
-   const int shmem_bytes = num_groups_per_block * SHMEM_HASH_SIZE * sizeof(int);
-   int dynamic_shmem_size = shmem_bytes;
-#else
    int dynamic_shmem_size = 0;
-#endif
 
    hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &numBlocksPerSm,
@@ -978,8 +963,7 @@ hypre_spgemm_symbolic_rownnz( int  m,
    dim3 bDim(BDIMX, BDIMY, num_groups_per_block);
 	assert(bDim.x * bDim.y == GROUP_SIZE);
    // grid dimension (number of blocks)
-   const int num_blocks = 220; //std::min( hypre_SpgemmBlockNumDim()[0][BIN],
-	//    (int) ((m + bDim.z - 1) / bDim.z) );
+	const int num_blocks = 220; // std::min( hypre_SpgemmBlockNumDim()[0][BIN],(int) ((m + bDim.z - 1) / bDim.z) );
    dim3 gDim( num_blocks );
    // number of active groups
    //int num_act_groups = std::min((int) (bDim.z * gDim.x), m);
@@ -1097,7 +1081,7 @@ int main(int argc, char * argv[])
 	int *d_jb;
 	int  in_rc=0;
 	int *d_rc;
-	char      *d_rf;
+	char *d_rf;
 
 	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &d_ia, &d_ja, m+1);
 	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &d_ib, &d_jb, k+1);
