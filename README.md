@@ -1,6 +1,8 @@
 # hypre_spgemm_symb_repro
 reproducer for symbolic matrix matrix multiply differences between ROCm 5.4.0 and 5.4.3
 
+tar zxvf input_files.gz
+	
 module load rocm/5.4.3
 hipcc -O1 -g -Wall -I/opt/rocm-5.4.3/include/hip/  hypre_repro.cpp
 srun -n 1 ./a.out
