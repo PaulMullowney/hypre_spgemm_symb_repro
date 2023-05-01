@@ -681,9 +681,18 @@ void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int *
 
 int main(int argc, char * argv[])
 {
-   int  m=245635;
-	int  k=786432;
-	int  n=245635;
+	int m, k;
+	if (atoi(argv[1])==1)
+	{
+		m=245635;
+		k=786432;
+	}
+	else
+	{
+		m=33825;
+		k=245635;
+	}
+	int n=m;
 	int *h_ia;
 	int *h_ja;
 	int *h_ib;
@@ -696,8 +705,16 @@ int main(int argc, char * argv[])
 	int *d_rc;
 	char *d_rf;
 
-	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &h_ia, &h_ja, &d_ia, &d_ja, m+1);
-	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &h_ib, &h_jb, &d_ib, &d_jb, k+1);
+	if (atoi(argv[1])==1)
+	{
+		initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &h_ia, &h_ja, &d_ia, &d_ja, m+1);
+		initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &h_ib, &h_jb, &d_ib, &d_jb, k+1);
+	}
+	else
+	{
+		initDeviceRowsAndCols("d_ia2.row_offsets.bin", "d_ja2.columns.bin", &h_ia, &h_ja, &d_ia, &d_ja, m+1);
+		initDeviceRowsAndCols("d_ib2.row_offsets.bin", "d_jb2.columns.bin", &h_ib, &h_jb, &d_ib, &d_jb, k+1);
+	}
 
 	HIP_CALL(hipMalloc((void **)&d_rc, m*sizeof(int)));
 	HIP_CALL(hipMemset(d_rc, 0, m*sizeof(int)));
