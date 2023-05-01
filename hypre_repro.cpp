@@ -1,5 +1,7 @@
 #include "hip_runtime.h"
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 #define HIP_CALL(call)                                                         \
   do {                                                                         \
@@ -426,7 +428,7 @@ hypre_spgemm_symbolic( const int               M,
                        const int* __restrict__ ig,
                        int*       __restrict__ jg,
                        int*       __restrict__ rc,
-                       char*            __restrict__ rf )
+                       char*      __restrict__ rf )
 {
    /* number of groups in the grid */
    volatile const int grid_num_groups = blockDim.z * gridDim.x;
@@ -506,7 +508,6 @@ hypre_spgemm_symbolic( const int               M,
 				}
 			}
       }
-
       group_sync<GROUP_SIZE>();
 
       /* start/end position of row of A */
@@ -656,27 +657,25 @@ hypre_spgemm_symbolic_rownnz( int  m,
 }
 
 
-void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int ** drows, int ** dcols, int n)
+void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int ** hrows, int ** hcols, int ** drows, int ** dcols, int n)
 {
 	printf("rows_name=%s, cols_name=%s\n",rows_name, cols_name);
-	int * hrows = (int *)malloc(n*sizeof(int));
+	*hrows = (int *)malloc(n*sizeof(int));
 	FILE * fid = fopen(rows_name,"rb");
-	fread(hrows, sizeof(int), n, fid);
+	fread(*hrows, sizeof(int), n, fid);
 	fclose(fid);
-	int nnz = hrows[n-1];
+	int nnz = (*hrows)[n-1];
 	printf("n=%d, nnz=%d\n",n,nnz);
 	HIP_CALL(hipMalloc((void **)drows, n*sizeof(int)));
-	HIP_CALL(hipMemcpy(*drows, hrows, n*sizeof(int), hipMemcpyHostToDevice));
-	free(hrows);
+	HIP_CALL(hipMemcpy(*drows, *hrows, n*sizeof(int), hipMemcpyHostToDevice));
 
-	int * hcols = (int *)malloc(nnz*sizeof(int));
+	*hcols = (int *)malloc(nnz*sizeof(int));
 	fid = fopen(cols_name,"rb");
-	fread(hcols, sizeof(int), nnz, fid);
+	fread(*hcols, sizeof(int), nnz, fid);
 	fclose(fid);
 
 	HIP_CALL(hipMalloc((void **)dcols, nnz*sizeof(int)));
-	HIP_CALL(hipMemcpy(*dcols, hcols, nnz*sizeof(int), hipMemcpyHostToDevice));
-	free(hcols);
+	HIP_CALL(hipMemcpy(*dcols, *hcols, nnz*sizeof(int), hipMemcpyHostToDevice));
 	return;
 }
 
@@ -685,6 +684,10 @@ int main(int argc, char * argv[])
    int  m=245635;
 	int  k=786432;
 	int  n=245635;
+	int *h_ia;
+	int *h_ja;
+	int *h_ib;
+	int *h_jb;
 	int *d_ia;
 	int *d_ja;
 	int *d_ib;
@@ -693,8 +696,8 @@ int main(int argc, char * argv[])
 	int *d_rc;
 	char *d_rf;
 
-	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &d_ia, &d_ja, m+1);
-	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &d_ib, &d_jb, k+1);
+	initDeviceRowsAndCols("d_ia.row_offsets.bin", "d_ja.columns.bin", &h_ia, &h_ja, &d_ia, &d_ja, m+1);
+	initDeviceRowsAndCols("d_ib.row_offsets.bin", "d_jb.columns.bin", &h_ib, &h_jb, &d_ib, &d_jb, k+1);
 
 	HIP_CALL(hipMalloc((void **)&d_rc, m*sizeof(int)));
 	HIP_CALL(hipMemset(d_rc, 0, m*sizeof(int)));
@@ -717,10 +720,42 @@ int main(int argc, char * argv[])
 		char * h_rf = (char *) malloc(m*sizeof(char));
 		HIP_CALL(hipMemcpy(h_rf, d_rf, m*sizeof(char), hipMemcpyDeviceToHost));
 
+		int * h_rc = (int *) malloc(m*sizeof(int));
+		HIP_CALL(hipMemcpy(h_rc, d_rc, m*sizeof(int), hipMemcpyDeviceToHost));
+
 		int num_failed_rows = 0;
 		for (int i=0; i<m; ++i)
 		{
-			if (h_rf[i]==1) num_failed_rows++;
+			if (h_rf[i]==1) {
+				std::vector<int> collisions(0);
+				num_failed_rows++;
+#ifdef DEBUG
+				printf("rc=%d, failed row=%d of %d : %d %d\n",h_rc[i],i,m,h_ia[i],h_ia[i+1]);
+#endif
+				for (int j=h_ia[i]; j<h_ia[i+1]; ++j)
+				{
+					int col = h_ja[j];
+#ifdef DEBUG
+					printf("\t%d : col A, row B=%d  nnz in row B=%d\n",j,col,h_ib[col+1]-h_ib[col]);
+					printf("\t\tcolumns in B :");
+#endif
+					for (int k=h_ib[col]; k<h_ib[col+1]; ++k)
+					{
+#ifdef DEBUG
+						printf(" %d",h_jb[k]);
+#endif
+						collisions.push_back(h_jb[k]);
+					}
+#ifdef DEBUG
+					printf("\n");
+#endif
+				}
+				std::sort(collisions.begin(), collisions.end());
+				auto last = std::unique(collisions.begin(), collisions.end());
+				printf("failed row = %d or %d\n",i,m);
+				printf("\tnumber of unique collisions found on GPU=%d\n",h_rc[i]);
+				printf("\tnumber of unique collisions found on CPU=%ld\n",last-collisions.begin());
+			}
 		}
 
 		printf("[%s, %d]: num of failed rows %d (%.2f)\n", __FILE__, __LINE__,
@@ -735,5 +770,9 @@ int main(int argc, char * argv[])
 	HIP_CALL(hipFree(d_ja));
 	HIP_CALL(hipFree(d_ib));
 	HIP_CALL(hipFree(d_jb));
+	free(h_ia);
+	free(h_ja);
+	free(h_ib);
+	free(h_jb);
    return 0;
 }
