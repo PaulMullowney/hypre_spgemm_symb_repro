@@ -475,13 +475,11 @@ hypre_spgemm_symbolic_rownnz( int  m,
 
 void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int ** hrows, int ** hcols, int ** drows, int ** dcols, int n, int ncols)
 {
-	printf("rows_name=%s, cols_name=%s\n",rows_name, cols_name);
 	*hrows = (int *)malloc(n*sizeof(int));
 	FILE * fid = fopen(rows_name,"rb");
 	fread(*hrows, sizeof(int), n, fid);
 	fclose(fid);
 	int nnz = (*hrows)[n-1];
-	printf("n=%d, nnz=%d\n",n,nnz);
 	HIP_CALL(hipMalloc((void **)drows, n*sizeof(int)));
 	HIP_CALL(hipMemcpy(*drows, *hrows, n*sizeof(int), hipMemcpyHostToDevice));
 
@@ -489,7 +487,10 @@ void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int *
 	fid = fopen(cols_name,"rb");
 	fread(*hcols, sizeof(int), nnz, fid);
 	fclose(fid);
+	HIP_CALL(hipMalloc((void **)dcols, nnz*sizeof(int)));
+	HIP_CALL(hipMemcpy(*dcols, *hcols, nnz*sizeof(int), hipMemcpyHostToDevice));
 
+	printf("rows_name=%s, cols_name=%s num_rows=%d, nnz=%d\n",rows_name, cols_name,n-1,nnz);
 	for (int i=0; i<n-1; ++i)
 	{
 		for (int j=(*hrows)[i]; j<(*hrows)[i+1]; ++j) {
@@ -499,8 +500,7 @@ void initDeviceRowsAndCols(const char * rows_name, const char * cols_name, int *
 			}
 		}
 	}
-	HIP_CALL(hipMalloc((void **)dcols, nnz*sizeof(int)));
-	HIP_CALL(hipMemcpy(*dcols, *hcols, nnz*sizeof(int), hipMemcpyHostToDevice));
+
 	return;
 }
 
@@ -518,14 +518,10 @@ int main(int argc, char * argv[])
 		k=245635;
 	}
 	int n=m;
-	int *h_ia;
-	int *h_ja;
-	int *h_ib;
-	int *h_jb;
-	int *d_ia;
-	int *d_ja;
-	int *d_ib;
-	int *d_jb;
+	int *h_ia, *h_ja;
+	int *h_ib, *h_jb;
+	int *d_ia, *d_ja;
+	int *d_ib, *d_jb;
 	int *d_rc;
 	char *d_rf;
 
