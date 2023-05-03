@@ -30,8 +30,6 @@
 #define HYPRE_1D_BLOCK_SIZE   512
 #define HYPRE_SPGEMM_MAX_NBIN 10
 
-static const char HYPRE_SPGEMM_HASH_TYPE = 'D';
-
 int spgemm_block_num_dim[4][HYPRE_SPGEMM_MAX_NBIN + 1];
 #define hypre_SpgemmBlockNumDim() spgemm_block_num_dim
 
@@ -199,34 +197,16 @@ int Hash2Func(int key)
 }
 
 
-template <int SHMEM_HASH_SIZE, char HASHTYPE>
+template <int SHMEM_HASH_SIZE>
 static __device__ __forceinline__
 int HashFunc(int key, int i, int prev)
 {
-   int hashval = 0;
-
-   /* assume m is power of 2 */
-   if (HASHTYPE == 'L')
-   {
-      //hashval = (key + i) % SHMEM_HASH_SIZE;
-      hashval = ( prev + 1 ) & (SHMEM_HASH_SIZE - 1);
-   }
-   else if (HASHTYPE == 'Q')
-   {
-      //hashval = (key + (i + i*i)/2) & (SHMEM_HASH_SIZE-1);
-      hashval = ( prev + i ) & (SHMEM_HASH_SIZE - 1);
-   }
-   else if (HASHTYPE == 'D')
-   {
-      //hashval = (key + i*Hash2Func(key) ) & (SHMEM_HASH_SIZE - 1);
-      hashval = ( prev + Hash2Func(key) ) & (SHMEM_HASH_SIZE - 1);
-   }
-
+	int hashval = ( prev + Hash2Func(key) ) & (SHMEM_HASH_SIZE - 1);
    return hashval;
 }
 
 
-template <int SHMEM_HASH_SIZE, char HASHTYPE, int UNROLL_FACTOR>
+template <int SHMEM_HASH_SIZE, int UNROLL_FACTOR>
 static __device__ __forceinline__
 int
 hypre_spgemm_hash_insert_symbl(
@@ -247,10 +227,10 @@ hypre_spgemm_hash_insert_symbl(
       }
       else
       {
-         j = HashFunc<SHMEM_HASH_SIZE, HASHTYPE>(key, i, j);
+         j = HashFunc<SHMEM_HASH_SIZE>(key, i, j);
       }
 
-      /* try to insert key+1 into slot j */
+      /* try to insert key into slot j */
       old = atomicCAS((int*)(HashKeys + j), -1, key);
       if (old == -1)
       {
@@ -265,7 +245,7 @@ hypre_spgemm_hash_insert_symbl(
    return -1;
 }
 
-template <int SHMEM_HASH_SIZE, char HASHTYPE, int GROUP_SIZE, bool IA1, int UNROLL_FACTOR>
+template <int SHMEM_HASH_SIZE, int GROUP_SIZE, bool IA1, int UNROLL_FACTOR>
 static __device__ __forceinline__
 int
 hypre_spgemm_compute_row_symbl( int           istart_a,
@@ -320,7 +300,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
             {
                const int k_idx = jb[k];
                /* first try to insert into shared memory hash table */
-               int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, HASHTYPE, UNROLL_FACTOR>
+               int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, UNROLL_FACTOR>
 						(s_HashKeys, k_idx, num_new_insert);
 
                /* if failed again, both hash tables must have been full
@@ -347,7 +327,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
    return num_new_insert;
 }
 
-template <int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE, int SHMEM_HASH_SIZE, char HASHTYPE>
+template <int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE, int SHMEM_HASH_SIZE>
 __global__ void
 hypre_spgemm_symbolic( const int               M,
                        const int* __restrict__ ia,
@@ -403,12 +383,12 @@ hypre_spgemm_symbolic( const int               M,
 
       if (iend_a == istart_a + 1)
       {
-			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, HASHTYPE, GROUP_SIZE, true, SHMEM_HASH_SIZE>
+			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, true, SHMEM_HASH_SIZE>
 				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
       }
       else
       {
-			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, HASHTYPE, GROUP_SIZE, false, SHMEM_HASH_SIZE>
+			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, false, SHMEM_HASH_SIZE>
 				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
       }
 
@@ -470,18 +450,12 @@ hypre_spgemm_symbolic_rownnz( int  m,
 	const int num_blocks = 220; // std::min( hypre_SpgemmBlockNumDim()[0][BIN],(int) ((m + bDim.z - 1) / bDim.z) );
    dim3 gDim( num_blocks );
 
-   const char HASH_TYPE = HYPRE_SPGEMM_HASH_TYPE;
-   if (HASH_TYPE != 'L' && HASH_TYPE != 'Q' && HASH_TYPE != 'D')
-   {
-      printf("Unrecognized hash type ... [L(inear), Q(uadratic), D(ouble)]\n");
-   }
-
    /* ---------------------------------------------------------------------------
     * build hash table (no values)
     * ---------------------------------------------------------------------------*/
 
-   printf("%s[%d], m %d k %d n %d, HASH %c, SHMEM_HASH_SIZE %d, GROUP_SIZE %d\n", __FILE__, __LINE__, m, k, n,
-			 HASH_TYPE, SHMEM_HASH_SIZE, GROUP_SIZE);
+   printf("%s[%d], m %d k %d n %d : SHMEM_HASH_SIZE %d, GROUP_SIZE %d\n", __FILE__, __LINE__, m, k, n,
+			 SHMEM_HASH_SIZE, GROUP_SIZE);
    printf("kernel spec [%d %d %d] x [%d %d %d] num_groups_per_block=%d\n", gDim.x, gDim.y, gDim.z, bDim.x, bDim.y,
 			 bDim.z, num_groups_per_block);
 
@@ -491,7 +465,7 @@ hypre_spgemm_symbolic_rownnz( int  m,
     * symbolic multiplication:
     * On output, it provides an upper bound of nnz in rows of C
     * ---------------------------------------------------------------------------*/
-	hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE, HASH_TYPE>
+	hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE>
 		<<<gDim, bDim, shmem_bytes, 0>>>(m, d_ia, d_ja, d_ib, d_jb, d_rc, d_rf );
 	HIP_CALL(hipGetLastError());
 
