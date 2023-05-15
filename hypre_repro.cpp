@@ -1,4 +1,4 @@
-#include "hip_runtime.h"
+#include <hip/hip_runtime.h>
 #include <cassert>
 #include <vector>
 #include <algorithm>
@@ -218,7 +218,7 @@ hypre_spgemm_hash_insert_symbl(
    int old = -1;
 
 #if HIP_VERSION_MAJOR == 5 && HIP_VERSION_MINOR == 4 && HIP_VERSION_PATCH == 22804
-#pragma unroll 8
+#pragma unroll
 #else
 #pragma unroll UNROLL_FACTOR
 #endif
