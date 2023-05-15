@@ -217,7 +217,11 @@ hypre_spgemm_hash_insert_symbl(
    int j = 0;
    int old = -1;
 
+#if HIP_VERSION_MAJOR == 5 && HIP_VERSION_MINOR == 4 && HIP_VERSION_PATCH == 22804
+#pragma unroll 8
+#else
 #pragma unroll UNROLL_FACTOR
+#endif
    for (int i = 0; i < SHMEM_HASH_SIZE; i++)
    {
       /* compute the hash value of key */
