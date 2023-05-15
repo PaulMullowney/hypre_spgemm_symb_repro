@@ -317,9 +317,9 @@ hypre_spgemm_symbolic( const int               M,
    /* lane id inside the group */
    const int lane_id = threadIdx.y * blockDim.x + threadIdx.x;
    /* shared memory hash table */
-   __shared__ volatile int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
+   __shared__ int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
    /* shared memory hash table for this group */
-   volatile int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
+   int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
 
    char failed = 0;
    int valid_ptr;
