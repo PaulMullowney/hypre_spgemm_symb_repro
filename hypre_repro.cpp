@@ -331,6 +331,37 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
    return num_new_insert;
 }
 
+__device__
+uint32_t get_hwid()
+{
+  // Magic from J. Greathouse
+  // http://gitlab1.amd.com/jgreatho/rocm_cu_masking/-/blob/master/test_cu_mask/test_cu_mask.cpp#L336
+  uint32_t hwid = 0;
+  __asm__ __volatile__ ("s_getreg_b32 %0 hwreg(HW_REG_HW_ID)\ns_nop 2" : "=s"(hwid));
+
+  return hwid;
+}
+
+// More magic from J. Greathouse
+// http://gitlab1.amd.com/jgreatho/rocm_cu_masking/-/blob/master/test_cu_mask/test_cu_mask.cpp#L207
+__device__
+uint32_t get_se( uint32_t hwid )
+{
+  return (hwid >> 13) & 0x7;
+}
+
+__device__
+uint32_t get_cu( uint32_t hwid )
+{
+  return (hwid >> 8) & 0xf;
+}
+
+__device__
+uint32_t get_simd( uint32_t hwid )
+{
+  return (hwid >> 4) & 0x3;
+}
+
 template <int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE, int SHMEM_HASH_SIZE>
 __global__ void
 hypre_spgemm_symbolic( const int               M,
@@ -338,8 +369,7 @@ hypre_spgemm_symbolic( const int               M,
                        const int* __restrict__ ja,
                        const int* __restrict__ ib,
                        const int* __restrict__ jb,
-                       int*       __restrict__ rc,
-                       char*      __restrict__ rf )
+                       int*       __restrict__ rc)
 {
    /* number of groups in the grid */
    volatile const int grid_num_groups = blockDim.z * gridDim.x;
@@ -396,35 +426,15 @@ hypre_spgemm_symbolic( const int               M,
 				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
       }
 
-      /* num of nonzeros of this row (an upper bound)
-       * use s_HashKeys as shared memory workspace */
-      if (GROUP_SIZE <= HYPRE_WARP_SIZE)
-      {
-         jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(jsum);
-      }
-      else
-      {
-         group_sync<GROUP_SIZE>();
-
-         jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(jsum, s_HashKeys);
-      }
+      jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(jsum);
 
       /* if this row failed */
-		if (GROUP_SIZE <= HYPRE_WARP_SIZE)
-		{
-			failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>((int) failed);
-		}
-		else
-		{
-			group_sync<GROUP_SIZE>();
-			failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>((int) failed,
-																											s_HashKeys);
-      }
+      //failed = (char) group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>((int) failed);
 
       if ((valid_ptr) && lane_id == 0)
       {
          rc[i] = jsum;
-			rf[i] = failed > 0;
+	 // rf[i] = failed > 0;
      }
    }
 }
@@ -438,8 +448,7 @@ hypre_spgemm_symbolic_rownnz( int  m,
                               int *d_ja,
                               int *d_ib,
                               int *d_jb,
-                              int *d_rc,
-                              char      *d_rf  /* output: if symbolic mult. failed for each row */ )
+                              int *d_rc)
 {
    constexpr int num_groups_per_block = hypre_spgemm_get_num_groups_per_block<GROUP_SIZE>();
    const int BDIMX                = std::min(2, GROUP_SIZE);
@@ -470,7 +479,7 @@ hypre_spgemm_symbolic_rownnz( int  m,
     * On output, it provides an upper bound of nnz in rows of C
     * ---------------------------------------------------------------------------*/
 	hypre_spgemm_symbolic<num_groups_per_block, GROUP_SIZE, SHMEM_HASH_SIZE>
-		<<<gDim, bDim, shmem_bytes, 0>>>(m, d_ia, d_ja, d_ib, d_jb, d_rc, d_rf );
+		<<<gDim, bDim, shmem_bytes, 0>>>(m, d_ia, d_ja, d_ib, d_jb, d_rc);
 	HIP_CALL(hipGetLastError());
 
    return 0;
@@ -549,10 +558,10 @@ int main(int argc, char * argv[])
    constexpr int GROUP_SIZE = 32; //64;
 
    hypre_spgemm_symbolic_rownnz<SHMEM_HASH_SIZE, GROUP_SIZE>
-   (m, k, n, d_ia, d_ja, d_ib, d_jb, d_rc, d_rf);
+   (m, k, n, d_ia, d_ja, d_ib, d_jb, d_rc);
 
 	/* row nnz is exact if no row failed */
-	char * h_rf = (char *) malloc(m*sizeof(char));
+	char * h_rf = (char *) calloc(m,sizeof(char));
 	HIP_CALL(hipMemcpy(h_rf, d_rf, m*sizeof(char), hipMemcpyDeviceToHost));
 
 	int * h_rc = (int *) malloc(m*sizeof(int));
