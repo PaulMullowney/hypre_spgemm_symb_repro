@@ -217,7 +217,7 @@ hypre_spgemm_hash_insert_symbl(
    return -1;
 }
 
-template <int SHMEM_HASH_SIZE, int GROUP_SIZE, bool IA1, int UNROLL_FACTOR>
+template <int SHMEM_HASH_SIZE, int GROUP_SIZE, int UNROLL_FACTOR>
 static __device__ __forceinline__
 int
 hypre_spgemm_compute_row_symbl( int           istart_a,
@@ -264,13 +264,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
       {
          if (k < rowB_end)
          {
-            if (IA1)
-            {
-               num_new_insert ++;
-            }
-            else
-            {
-               const int k_idx = jb[k];
+	       const int k_idx = jb[k];
                /* first try to insert into shared memory hash table */
                int pos = hypre_spgemm_hash_insert_symbl<SHMEM_HASH_SIZE, UNROLL_FACTOR>
 						(s_HashKeys, k_idx, num_new_insert);
@@ -283,7 +277,6 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
                   num_new_insert ++;
                   failed = 1;
                }
-            }
          }
       }
 #ifdef DEV_DEBUG
@@ -379,16 +372,8 @@ hypre_spgemm_symbolic( const int               M,
       /* work with two hash tables */
       int jsum;
 
-      if (iend_a == istart_a + 1)
-      {
-			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, false, SHMEM_HASH_SIZE>
-				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
-      }
-      else
-      {
-			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, false, SHMEM_HASH_SIZE>
-				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
-      }
+      jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, SHMEM_HASH_SIZE>(
+		      istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
 
       jsum = group_reduce_sum<int, NUM_GROUPS_PER_BLOCK, GROUP_SIZE>(jsum);
 
