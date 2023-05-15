@@ -59,14 +59,7 @@ template <int GROUP_SIZE>
 static __device__ __forceinline__
 int get_warp_in_group_id()
 {
-   if (GROUP_SIZE <= HYPRE_WARP_SIZE)
-   {
-      return 0;
-   }
-   else
-   {
-      return (threadIdx.y * blockDim.x + threadIdx.x) >> HYPRE_WARP_BITSHIFT;
-   }
+   return 0;
 }
 
 /* group reads 2 values from ptr to v1 and v2
@@ -84,23 +77,6 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
          v1 = ptr[lane];
       }
       v2 = __shfl(v1, 1, GROUP_SIZE);
-      v1 = __shfl(v1, 0, GROUP_SIZE);
-}
-
-/* group reads a value from ptr to v1
- * GROUP_SIZE must be >= 2
- */
-template <int GROUP_SIZE>
-static __device__ __forceinline__
-void group_read(const int *ptr, bool valid_ptr, int &v1)
-{
-      /* lane = group_lane */
-      const int lane = threadIdx.y * blockDim.x + threadIdx.x;
-
-      if (valid_ptr && !lane)
-      {
-         v1 = *ptr;
-      }
       v1 = __shfl(v1, 0, GROUP_SIZE);
 }
 
@@ -249,7 +225,7 @@ hypre_spgemm_compute_row_symbl( int           istart_a,
       }
 
       /* threads in the same ygroup work on one row together */
-		rowB = __shfl(rowB, 0, blockDim_x);
+      rowB = __shfl(rowB, 0, blockDim_x);
 
       /* open this row of B, collectively */
       int tmp = 0;
@@ -333,13 +309,13 @@ hypre_spgemm_symbolic( const int               M,
                        int*       __restrict__ rc)
 {
    /* number of groups in the grid */
-   volatile const int grid_num_groups = blockDim.z * gridDim.x;
+   const int grid_num_groups = blockDim.z * gridDim.x;
    /* group id inside the block */
-   volatile const int group_id = threadIdx.z;
+   const int group_id = threadIdx.z;
    /* group id in the grid */
-   volatile const int grid_group_id = blockIdx.x * blockDim.z + group_id;
+   const int grid_group_id = blockIdx.x * blockDim.z + group_id;
    /* lane id inside the group */
-   volatile const int lane_id = threadIdx.y * blockDim.x + threadIdx.x;
+   const int lane_id = threadIdx.y * blockDim.x + threadIdx.x;
    /* shared memory hash table */
    __shared__ volatile int s_HashKeys[NUM_GROUPS_PER_BLOCK * SHMEM_HASH_SIZE];
    /* shared memory hash table for this group */
