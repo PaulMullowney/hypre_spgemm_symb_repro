@@ -77,22 +77,6 @@ static __device__ __forceinline__
 void group_read(const int *ptr, bool valid_ptr, int &v1,
                 int &v2)
 {
-   if (GROUP_SIZE >= HYPRE_WARP_SIZE)
-   {
-      /* lane = warp_lane
-       * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const int lane = (threadIdx.y * blockDim.x + threadIdx.x) & (HYPRE_WARP_SIZE - 1);
-
-      if (lane < 2)
-      {
-         v1 = ptr[lane];
-      }
-      v2 = __shfl(v1, 1, HYPRE_WARP_SIZE);
-      v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
-   }
-   else
-   {
-      /* lane = group_lane */
       const int lane = threadIdx.y * blockDim.x + threadIdx.x;
 
       if (valid_ptr && lane < 2)
@@ -101,7 +85,6 @@ void group_read(const int *ptr, bool valid_ptr, int &v1,
       }
       v2 = __shfl(v1, 1, GROUP_SIZE);
       v1 = __shfl(v1, 0, GROUP_SIZE);
-   }
 }
 
 /* group reads a value from ptr to v1
@@ -111,20 +94,6 @@ template <int GROUP_SIZE>
 static __device__ __forceinline__
 void group_read(const int *ptr, bool valid_ptr, int &v1)
 {
-   if (GROUP_SIZE >= HYPRE_WARP_SIZE)
-   {
-      /* lane = warp_lane
-       * Note: use "2" since assume HYPRE_WARP_SIZE divides (blockDim.x * blockDim.y) */
-      const int lane = (threadIdx.y * blockDim.x + threadIdx.x) & (HYPRE_WARP_SIZE - 1);
-
-      if (!lane)
-      {
-         v1 = *ptr;
-      }
-		v1 = __shfl(v1, 0, HYPRE_WARP_SIZE);
-   }
-   else
-   {
       /* lane = group_lane */
       const int lane = threadIdx.y * blockDim.x + threadIdx.x;
 
@@ -133,7 +102,6 @@ void group_read(const int *ptr, bool valid_ptr, int &v1)
          v1 = *ptr;
       }
       v1 = __shfl(v1, 0, GROUP_SIZE);
-   }
 }
 
 template <typename T, int NUM_GROUPS_PER_BLOCK, int GROUP_SIZE>
@@ -384,6 +352,7 @@ hypre_spgemm_symbolic( const int               M,
    /* shared memory hash table for this group */
    volatile int *group_s_HashKeys = s_HashKeys + group_id * SHMEM_HASH_SIZE;
 
+   char failed = 0;
    int valid_ptr;
 
    /* WM: note - in cuda/hip, exited threads are not required to reach collective calls like
@@ -391,18 +360,13 @@ hypre_spgemm_symbolic( const int               M,
     *            Thus, all threads in the block must enter the loop (which is not ensured for cuda). */
    for (int i = grid_group_id; __any(i<M); i += grid_num_groups)
    {
-      valid_ptr = GROUP_SIZE >= HYPRE_WARP_SIZE || i < M;
-
-      char failed = 0;
+      valid_ptr = i < M;
 
       /* initialize group's shared memory hash table */
-      if (valid_ptr)
+       #pragma unroll SHMEM_HASH_SIZE
+      for (int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
       {
-#pragma unroll SHMEM_HASH_SIZE
-			for (int k = lane_id; k < SHMEM_HASH_SIZE; k += GROUP_SIZE)
-			{
-				group_s_HashKeys[k] = -1;
-			}
+	group_s_HashKeys[k] = -1;
       }
       group_sync<GROUP_SIZE>();
 
@@ -417,7 +381,7 @@ hypre_spgemm_symbolic( const int               M,
 
       if (iend_a == istart_a + 1)
       {
-			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, true, SHMEM_HASH_SIZE>
+			jsum = hypre_spgemm_compute_row_symbl<SHMEM_HASH_SIZE, GROUP_SIZE, false, SHMEM_HASH_SIZE>
 				(istart_a, iend_a, ja, ib, jb, group_s_HashKeys, failed, i);
       }
       else
