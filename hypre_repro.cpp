@@ -127,8 +127,6 @@ template <int GROUP_SIZE>
 static __device__ __forceinline__
 void group_sync()
 {
-   if (GROUP_SIZE > HYPRE_WARP_SIZE)
-      __syncthreads();
 }
 
 /* Hash functions */
